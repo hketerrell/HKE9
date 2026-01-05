@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>HKE九張｜PeerJS 線上撲克牌（sticker測試中）</title>
+  <title>HKE九張｜PeerJS 線上撲克牌（測試中）</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
@@ -925,6 +925,17 @@
 
       const bottomBar = $('bottomBar');
       if (bottomBar) bottomBar.classList.toggle('hidden', arrangeOpen);
+
+      // Danmaku should only show on the table (game page) and only when no modal is open.
+      const dan = $('danmaku');
+      if (dan) {
+        const inGame = !$('pageGame').classList.contains('hidden');
+        const show = inGame && !anyOpen;
+        if (!show) {
+          dan.innerHTML = '';
+          dan.classList.add('hidden');
+        }
+      }
     }
 
     // -------------------- Modal helpers --------------------
@@ -1330,6 +1341,16 @@
     function spawnDanmaku(payload, from='') {
       const root = $('danmaku');
       if (!root) return;
+
+      // Danmaku only on table view (pageGame) and not during any modal.
+      const inGame = !$('pageGame').classList.contains('hidden');
+      const ids = ['revealModal','gameOverModal','statusModal','reportModal','logModal','dealerPickPreModal','arrangeModal'];
+      const anyOpen = ids.some(id => {
+        const n = $(id);
+        return n && !n.classList.contains('hidden');
+      });
+      if (!inGame || anyOpen) return;
+
       root.classList.remove('hidden');
 
       const p = (payload && typeof payload === 'object') ? payload : {kind:'text', text:String(payload||'')};
@@ -3838,12 +3859,18 @@
         };
 
         const mkLine = (label, evalName, v, mode='normal') => {
+          // Use a fixed "cards column" width so head text aligns with mid/tail text.
+          // 3 mini-cards width ~= 96px (incl. overlap); keep a little gutter.
           const row = el('div','flex items-center gap-2');
-          const left = el('div','shrink-0 flex items-center gap-0');
-          row.appendChild(left);
+          const leftCol = el('div','shrink-0 flex items-center');
+          leftCol.style.width = '106px';
+          row.appendChild(leftCol);
+
+          const cardsWrap = el('div','flex gap-0 flex-nowrap');
+          leftCol.appendChild(cardsWrap);
 
           // 報到模式：不顯示三墩牌型/分數文字，只顯示卡片
-          if (mode === 'report') return {row, left};
+          if (mode === 'report') return {row, left: cardsWrap};
 
           const right = el('div','min-w-0 flex-1 text-[10px] leading-tight text-emerald-50/90 flex items-center justify-between gap-2');
 
@@ -3861,7 +3888,7 @@
           right.appendChild(txt);
           right.appendChild(score);
           row.appendChild(right);
-          return {row, left};
+          return {row, left: cardsWrap};
         };
 
         const head = mkCardLine(2);
