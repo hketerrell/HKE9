@@ -1124,7 +1124,13 @@
       clientState.chatUnread = false;
       updateChatUnread();
       updateBodyOverflow();
-      // scroll chat list to top (newest first) – prepend already
+
+      // Load stickers on-demand (GitHub API may rate-limit; retry when opening)
+      try {
+        const root = $('chatStickers');
+        if (root && root.childElementCount === 0) initStickers();
+      } catch {}
+
       try { $('inpChat').focus(); } catch {}
     }
     function closeLogModal() {
@@ -1196,12 +1202,16 @@
       status.textContent = '載入中…';
 
       try {
-        const api = 'https://api.github.com/repos/hketerrell/HKE9/contents/sticker?ref=20c45f14e91ea5564a63fb95eb80ff6234b2dd82';
+        const api = 'https://api.github.com/repos/hketerrell/HKE9/contents/sticker?ref=main';
         const res = await fetch(api, {cache:'no-store'});
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const list = await res.json();
         const files = (Array.isArray(list) ? list : [])
-          .filter(x => x && x.type === 'file' && String(x.name||'').toLowerCase().endsWith('.png') && x.download_url)
+          .filter(x => {
+            if (!x || x.type !== 'file' || !x.download_url) return false;
+            const n = String(x.name || '').toLowerCase();
+            return n.endsWith('.png') || n.endsWith('.webp');
+          })
           .sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
 
         if (!files.length) {
@@ -2925,7 +2935,13 @@
       if (msg.t === 'danmaku') {
         // de-dup: if this is my own danmaku echoed back, skip (already shown locally)
         if (msg.fromId && msg.fromId === myId) return;
-        spawnDanmaku(String(msg.text||''), String(msg.from||''));
+
+        const kind = msg.kind || 'text';
+        if (kind === 'sticker' && msg.url) {
+          spawnDanmaku({kind:'sticker', url: String(msg.url||'')}, String(msg.from||''));
+        } else {
+          spawnDanmaku({kind:'text', text: String(msg.text||'')}, String(msg.from||''));
+        }
         return;
       }
 
@@ -4974,6 +4990,9 @@
       renderPlayers();
       showPage('lobby');
       log('開啟頁面完成。可建立房間或加入房間。');
+
+      // Init stickers for chat
+      try { initStickers(); } catch {}
 
       // Auto-join from share link
       if (room) {
