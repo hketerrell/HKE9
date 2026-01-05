@@ -1,0 +1,4844 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>HKE九張｜PeerJS 線上撲克牌（測試中）</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    html, body { height: 100%; touch-action: manipulation; }
+    button, input, select { touch-action: manipulation; }
+    .card { user-select: none; -webkit-user-select: none; }
+    .mono { font-variant-numeric: tabular-nums; }
+
+    /* Poker card look */
+    .poker-card {
+      position: relative;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border: 1px solid rgba(15,23,42,.22);
+      border-radius: 14px;
+      box-shadow: 0 10px 22px rgba(0,0,0,.18);
+      overflow: hidden;
+    }
+    .poker-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 13px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.75);
+      pointer-events: none;
+    }
+    .poker-card:active { transform: scale(.99); }
+
+    .pcorner {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      user-select: none;
+    }
+    .pcorner.tl { left: 6px; top: 6px; }
+    .pcorner.br { right: 6px; bottom: 6px; transform: rotate(180deg); }
+    .pcorner .prank { font-size: 14px; }
+    .pcorner .psuit { font-size: 14px; margin-top: 2px; }
+
+    .pcenter {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-weight: 900;
+      text-shadow: 0 6px 20px rgba(0,0,0,.12);
+      user-select: none;
+      pointer-events: none;
+    }
+
+    /* size tuning */
+    /* Hand cards (in Hand Dock): compact to avoid covering arrange area */
+    .poker-card.pc-hand .pcorner .prank { font-size: 11px; }
+    .poker-card.pc-hand .pcorner .psuit { font-size: 11px; }
+    .poker-card.pc-hand .pcenter { font-size: 26px; }
+
+    .poker-card.pc-slot .pcorner .prank { font-size: 11px; }
+    .poker-card.pc-slot .pcorner .psuit { font-size: 11px; }
+    .poker-card.pc-slot .pcenter { font-size: 20px; }
+
+    /* Mini cards (table reveal) */
+    .poker-card.pc-mini { border-radius: 6px; }
+    .poker-card.pc-mini .pcorner.tl { left: 2px; top: 2px; }
+    .poker-card.pc-mini .pcorner.br { right: 2px; bottom: 2px; }
+    .poker-card.pc-mini .pcorner .prank { font-size: 7px; }
+    .poker-card.pc-mini .pcorner .psuit { font-size: 7px; margin-top: 0px; }
+    .poker-card.pc-mini .pcenter { font-size: 10px; }
+    .poker-card.pc-mini.pc-joker .pcenter { font-size: 8px; letter-spacing: .02em; }
+
+    /* Card back */
+    .poker-card.card-back {
+      background:
+        radial-gradient(140px 90px at 40% 30%, rgba(250,204,21,.25), rgba(2,6,23,0) 60%),
+        repeating-linear-gradient(45deg, #1d4ed8 0 6px, #0f172a 6px 12px);
+      border-color: rgba(255,255,255,.18);
+    }
+    .poker-card.card-back::before {
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.25);
+    }
+
+    .poker-card.pc-joker .pcenter {
+      font-size: 12px;
+      letter-spacing: .10em;
+    }
+
+    /* Hand overlap (stacked/fanned) */
+    #hand { align-items: flex-end; }
+    /* tighter overlap for smaller hand cards */
+    .hand-overlap { margin-left: -32px; }
+
+    /* Kiosk-like fullscreen landscape */
+    @media (orientation: portrait) {
+      #rotateHint { display: flex !important; }
+      #appRoot { display: none !important; }
+    }
+
+    /* "開心鬥一番" 風格：綠桌 + 金色點綴 */
+    body {
+      background:
+        radial-gradient(1200px 600px at 50% -10%, rgba(34,197,94,.35), rgba(2,6,23,0) 55%),
+        radial-gradient(800px 500px at 20% 10%, rgba(250,204,21,.20), rgba(2,6,23,0) 55%),
+        radial-gradient(900px 650px at 80% 15%, rgba(59,130,246,.16), rgba(2,6,23,0) 60%),
+        linear-gradient(180deg, #064e3b 0%, #052e24 40%, #020617 100%);
+    }
+    .panel {
+      background: rgba(2,6,23,0.55);
+      border: 1px solid rgba(250,204,21,0.18);
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+    }
+    .chip {
+      border: 1px solid rgba(250,204,21,.25);
+      background: rgba(250,204,21,.08);
+    }
+
+    /* Modal backdrop */
+    .backdrop {
+      background: rgba(2,6,23,.72);
+      backdrop-filter: blur(10px);
+    }
+
+    /* Fun animations */
+    @keyframes dealIn {
+      from { transform: translateY(12px) scale(.98); opacity: 0; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .deal-card { animation: dealIn .35s ease-out both; }
+
+    @keyframes modalUp {
+      from { transform: translateY(18px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .modal-in { animation: modalUp .22s ease-out both; }
+
+    @keyframes glowPulse {
+      0%,100% { box-shadow: 0 0 0 rgba(250,204,21,0); }
+      50% { box-shadow: 0 0 28px rgba(250,204,21,.18); }
+    }
+    .glow-pulse { animation: glowPulse 1.4s ease-in-out infinite; }
+
+    /* Chat unread indicator: whole button blink */
+    @keyframes chatBtnPulse {
+      0%, 100% { transform: translateY(0); filter: brightness(1); box-shadow: 0 0 0 rgba(250,204,21,0); }
+      50% { transform: translateY(-1px); filter: brightness(1.15); box-shadow: 0 0 0 3px rgba(250,204,21,.18), 0 0 18px rgba(250,204,21,.22); }
+    }
+    #btnOpenLog.chat-unread {
+      animation: chatBtnPulse 1s ease-in-out infinite;
+      border-color: rgba(250,204,21,.35) !important;
+      background: rgba(250,204,21,.10) !important;
+    }
+
+    /* Danmaku */
+    @keyframes danmakuFly {
+      from { transform: translateX(110vw); }
+      to { transform: translateX(-140%); }
+    }
+    .danmaku-item {
+      position: absolute;
+      left: 0;
+      white-space: nowrap;
+      padding: 6px 10px;
+      border-radius: 9999px;
+      background: rgba(2,6,23,.55);
+      border: 1px solid rgba(250,204,21,.25);
+      color: rgba(255,255,255,.98);
+      font-weight: 900;
+      letter-spacing: .02em;
+      text-shadow: 0 2px 14px rgba(0,0,0,.45);
+      backdrop-filter: blur(10px);
+      will-change: transform;
+    }
+
+    /* Table scene */
+    .table-felt {
+      background:
+        radial-gradient(400px 260px at 50% 40%, rgba(250,204,21,.14), rgba(2,6,23,0) 65%),
+        radial-gradient(900px 600px at 50% 50%, rgba(34,197,94,.22), rgba(2,6,23,0) 70%),
+        linear-gradient(180deg, rgba(6,78,59,.55), rgba(2,6,23,.35));
+    }
+
+    @keyframes revealPop {
+      from { transform: scale(.92); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .reveal-fan { animation: revealPop .26s ease-out both; transform-origin: top center; }
+
+    canvas.confetti {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 70;
+    }
+
+    /* Poop animation (seat prank) */
+    @keyframes poopDrop {
+      0% { transform: translate(-50%, -18px) scale(.55) rotate(-12deg); opacity: 0; }
+      15% { opacity: 1; }
+      60% { transform: translate(-50%, 12px) scale(1.08) rotate(10deg); }
+      100% { transform: translate(-50%, 30px) scale(.92) rotate(0deg); opacity: 0; }
+    }
+    .poop-item {
+      position: absolute;
+      left: 50%;
+      top: 6px;
+      font-size: 26px;
+      line-height: 1;
+      pointer-events: none;
+      filter: drop-shadow(0 10px 18px rgba(0,0,0,.45));
+      animation: poopDrop 900ms cubic-bezier(.2,.9,.2,1) both;
+      z-index: 3;
+    }
+
+    /* Poop projectile (throw) */
+    .poop-throw {
+      position: fixed;
+      left: 0;
+      top: 0;
+      transform: translate(-50%, -50%);
+      font-size: 28px;
+      line-height: 1;
+      pointer-events: none;
+      z-index: 65;
+      filter: drop-shadow(0 10px 18px rgba(0,0,0,.45));
+      will-change: left, top, transform;
+    }
+
+    /* Hand dock safe-area */
+    .hand-dock {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  </style>
+</head>
+<body class="text-slate-50 min-h-screen overflow-hidden">
+  <!-- Rotate hint (portrait only) -->
+  <div id="rotateHint" class="hidden fixed inset-0 z-[80] items-center justify-center p-6">
+    <div class="rounded-2xl panel border border-amber-200/20 p-5 max-w-md w-full text-center">
+      <div class="text-xs text-emerald-100/70">HKE九張｜全屏橫版</div>
+      <div class="mt-2 text-lg font-black tracking-tight">請把手機轉為橫向</div>
+      <div class="mt-2 text-sm text-emerald-50/80">為了方便牌桌操作，本 WebApp 只支援橫版全屏顯示。</div>
+    </div>
+  </div>
+
+  <div id="appRoot" class="fixed inset-0">
+    <div class="h-full max-w-none mx-auto p-0 relative">
+      <div class="absolute top-2 left-2 z-[60]">
+        <span id="netBadge" class="text-[11px] px-2 py-1 rounded-full chip text-amber-100">離線</span>
+      </div>
+      <div class="absolute top-2 right-2 z-[40]">
+        <button id="btnGoLobby" class="hidden text-[11px] px-2.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">回大廳</button>
+      </div>
+
+      <!-- Lobby Page -->
+    <main id="pageLobby" class="h-full">
+      <section class="h-full rounded-none border-0 table-felt p-0">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <div class="text-[11px] text-emerald-100/80">大廳｜玩家圍桌</div>
+          <div class="flex items-center gap-2">
+            <div id="roleBadge" class="text-[11px] inline-flex px-2 py-1 rounded-full bg-black/30 border border-white/10 text-slate-100">未連線</div>
+            <div class="text-[11px] text-emerald-100/70"><span id="playersCount">0</span> 人</div>
+          </div>
+        </div>
+
+        <div class="relative w-full h-[calc(100%-32px)] max-w-none mx-auto">
+          <div class="absolute inset-0">
+            <div class="absolute inset-0 rounded-[28px] border border-amber-200/15 table-felt"></div>
+          </div>
+
+          <!-- Seats ring (rendered by JS) -->
+          <div id="lobbySeats" class="absolute inset-0"></div>
+
+          <!-- Center controls (HKE pot) -->
+          <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] sm:w-[360px]">
+            <div class="rounded-2xl panel border border-amber-200/15 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="rounded-full px-3 py-1 chip text-amber-100 text-xs font-black">HKE九張</div>
+                <div class="text-[11px] text-emerald-100/70">房間</div>
+              </div>
+
+              <div class="mt-2 grid gap-2">
+                <div class="grid gap-1">
+                  <label class="text-[11px] text-emerald-100/70">暱稱</label>
+                  <div class="flex gap-2">
+                    <input id="inpName" class="flex-1 bg-black/35 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-200/50" placeholder="例如：小明" maxlength="20" />
+                    <button id="btnSaveName" class="px-3 py-2 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 text-sm font-semibold hover:brightness-105">儲存</button>
+                  </div>
+                </div>
+
+                <div class="grid gap-1">
+                  <div class="flex items-center justify-between">
+                    <label class="text-[11px] text-emerald-100/70">房間號（加入 / 建立）</label>
+                    <label class="inline-flex items-center gap-1.5 text-[11px] text-emerald-100/80 select-none">
+                      <input id="chkUseTurn" type="checkbox" class="accent-amber-400" />
+                      TURN
+                    </label>
+                  </div>
+                  <input id="inpRoomId" class="w-full mono bg-black/35 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-amber-200/50" placeholder="留空＝自動；填入＝指定房號" />
+                  <div class="text-[10px] text-emerald-100/70">提示：跨網絡連不上時再勾 TURN（中繼）。</div>
+                </div>
+
+                <div class="flex gap-2">
+                  <button id="btnCreateRoom" class="flex-1 px-4 py-2 rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-500 text-emerald-950 font-semibold hover:brightness-105">建立</button>
+                  <button id="btnJoinRoom" class="flex-1 px-4 py-2 rounded-xl bg-gradient-to-b from-sky-400 to-sky-500 text-sky-950 font-semibold hover:brightness-105">加入</button>
+                  <button id="btnStartGame" class="hidden flex-1 px-4 py-2 rounded-xl bg-gradient-to-b from-indigo-400 to-indigo-500 text-indigo-950 font-semibold hover:brightness-105">開始</button>
+                  <button id="btnLeave" class="hidden flex-1 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">離開</button>
+                </div>
+
+                <div class="flex items-center justify-between gap-2">
+                  <div class="grid gap-1">
+                    <label class="text-[11px] text-emerald-100/70">局數（5 的倍數）</label>
+                    <input id="inpRounds" type="number" min="5" step="5" value="5" class="w-28 mono bg-black/35 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-amber-200/50" />
+                  </div>
+                  <button id="btnApplyRounds" class="hidden px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-[11px]">套用</button>
+                  <div class="text-right">
+                    <div class="text-[10px] text-emerald-100/70">我的房號</div>
+                    <div class="flex items-center gap-2">
+                      <div id="myPeerId" class="mono text-[11px] px-2 py-1 rounded-lg bg-black/30 border border-white/10 text-slate-100">—</div>
+                      <button id="btnCopyRoom" class="hidden text-[11px] px-2.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">複製</button>
+                      <button id="btnCopyLink" class="hidden text-[11px] px-2.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">連結</button>
+                    </div>
+                  </div>
+                </div>
+
+                <details class="hidden rounded-xl bg-black/20 border border-white/10 p-2">
+                  <summary class="cursor-pointer select-none text-[11px] text-emerald-100/80">更多設定（進階連線）</summary>
+                  <div class="mt-2 grid gap-2">
+                    <div class="grid gap-1">
+                      <label class="text-[11px] text-emerald-100/70">TURN URL（選填）</label>
+                      <input id="inpTurnUrl" class="mono bg-black/35 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-amber-200/50" placeholder="turns:your-domain:5349 或 turn:ip:3478" maxlength="120" />
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-2">
+                      <div class="grid gap-1">
+                        <label class="text-[11px] text-emerald-100/70">TURN Username（選填）</label>
+                        <input id="inpTurnUser" class="mono bg-black/35 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-amber-200/50" placeholder="username" maxlength="80" />
+                      </div>
+                      <div class="grid gap-1">
+                        <label class="text-[11px] text-emerald-100/70">TURN Password（選填）</label>
+                        <input id="inpTurnPass" type="password" class="mono bg-black/35 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-amber-200/50" placeholder="password" maxlength="80" />
+                      </div>
+                    </div>
+                    <label class="inline-flex items-center gap-2 text-[11px] text-emerald-100/80">
+                      <input id="chkRelayOnly" type="checkbox" class="accent-amber-400" />
+                      優先使用中繼（relay-only，需要 TURN；延遲會增加）
+                    </label>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button id="btnSaveNet" class="text-[11px] px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">儲存</button>
+                      <button id="btnClearNet" class="text-[11px] px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">恢復預設</button>
+                      <button id="btnTestTurn" class="text-[11px] px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">測試 TURN</button>
+                    </div>
+                    <div id="turnTestStatus" class="text-[11px] text-emerald-100/70">TURN 測試：尚未測試</div>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hide non-table sections in kiosk mode -->
+      <div class="hidden">
+        <details class="rounded-2xl panel p-4">
+          <summary class="cursor-pointer select-none text-sm text-slate-100">玩家列表（詳細）</summary>
+          <div id="playersList" class="mt-3 grid gap-2"></div>
+        </details>
+        <section class="rounded-2xl panel p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold">事件紀錄</h2>
+            <button id="btnClearLog" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">清空</button>
+          </div>
+          <div id="log" class="mt-3 text-xs text-emerald-50/80 space-y-1 max-h-56 overflow-auto"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Game Page -->
+    <main id="pageGame" class="hidden h-full">
+      <!-- Table-only screen (kiosk) -->
+      <div class="h-full rounded-none border-0 table-felt p-0">
+        <div id="tableSeats" class="relative w-full h-full max-w-none mx-auto">
+          <!-- Center pot / action hotspot -->
+          <button id="btnOpenActionMenu" type="button" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition">
+            HKE九張
+          </button>
+        </div>
+
+        <!-- small status line (kiosk) -->
+        <div class="absolute left-2 bottom-2 text-[11px] text-emerald-100/70">
+          <span id="foulHint">擺烏龍：頭 &gt; 中 或 中 &gt; 尾（允許提交；結算時處理）</span>
+          <span class="mx-2">｜</span>
+          你的提交：<span id="submitStatus" class="text-emerald-50/80">尚未提交</span>
+        </div>
+      </div>
+
+      <!-- Hand Dock (fixed, above bottom bar) - only shown while Arrange Modal is open -->
+      <div id="handDock" class="hand-dock fixed left-0 right-0 bottom-[56px] z-[56] hidden">
+        <div class="mx-auto max-w-5xl px-2">
+          <div class="rounded-2xl panel border border-white/10 p-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-[10px] text-emerald-100/80">手牌</div>
+              <div id="selectedHint" class="text-[10px] text-emerald-100/70 text-right">未選取牌</div>
+            </div>
+            <div id="hand" class="mt-1 flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-1 flex-nowrap"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom action bar (mobile friendly) -->
+      <div id="bottomBar" class="fixed bottom-0 left-0 right-0 z-[45]">
+        <div class="mx-auto max-w-5xl px-3 pb-3">
+          <div class="rounded-2xl panel border border-white/10 p-2 flex items-center justify-between gap-2">
+            <button id="btnOpenStatus" class="flex-1 text-xs px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">狀態/結果</button>
+            <button id="btnMidAction" class="flex-1 text-xs px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">牌組</button>
+            <button id="btnOpenLog" class="flex-1 text-xs px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">聊天</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Danmaku overlay -->
+  <div id="danmaku" class="fixed inset-0 pointer-events-none z-[60] hidden"></div>
+
+  <!-- Confetti canvas (game over) -->
+  <canvas id="confetti" class="confetti hidden"></canvas>
+
+  <!-- Game Over Modal -->
+  <div id="gameOverModal" class="hidden fixed inset-0 z-[55]">
+    <div class="absolute inset-0 backdrop" id="gameOverBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-3">
+      <div class="w-full sm:max-w-2xl rounded-2xl panel border border-amber-200/20 modal-in">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">遊戲完結</div>
+            <div class="mt-1 text-lg font-black tracking-tight">總結｜<span id="gameOverRoom" class="mono">—</span></div>
+            <div class="mt-1 text-xs text-emerald-100/70">你可以選擇再來一局（重新從第 1 局開始）或離開房間。</div>
+          </div>
+          <button id="btnCloseGameOver" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+        </div>
+
+        <div class="p-4 grid gap-3 max-h-[70vh] overflow-auto">
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold">最終排行榜</div>
+              <div class="text-xs text-emerald-100/70">依累計分數排序</div>
+            </div>
+            <div class="mt-2 overflow-auto">
+              <table class="w-full text-sm">
+                <thead class="text-emerald-100/80">
+                  <tr class="border-b border-white/10">
+                    <th class="text-left py-2">玩家</th>
+                    <th class="text-left py-2">累計</th>
+                  </tr>
+                </thead>
+                <tbody id="gameOverBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div class="p-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+          <div class="text-xs text-emerald-100/70">房主按「再來一局」會立即重開；玩家按「再來一局」會向房主提出請求。</div>
+          <div class="flex items-center gap-2">
+            <button id="btnRestart" class="px-4 py-2 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-black hover:brightness-105 glow-pulse">再來一局</button>
+            <button id="btnExitRoom" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">離開房間</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Modal (Ready + Score summary) -->
+  <div id="statusModal" class="hidden fixed inset-0 z-[52]">
+    <div class="absolute inset-0 backdrop" id="statusBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-3">
+      <div class="w-full sm:max-w-3xl rounded-2xl panel border border-amber-200/20 modal-in">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">本局狀態 / 結果（摘要）</div>
+            <div class="mt-1 text-lg font-black tracking-tight">狀態｜第 <span id="statusRound" class="mono">—</span> 局</div>
+            <div class="mt-1 text-xs text-emerald-100/70">提示：完整牌組請用「查看本局結算」。</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btnReveal" class="hidden text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">立即結算（房主）</button>
+            <button id="btnNextRound" class="hidden text-xs px-3 py-2 rounded-lg bg-gradient-to-b from-emerald-400 to-emerald-500 text-emerald-950 font-semibold hover:brightness-105">下一局（房主）</button>
+            <button id="btnCloseStatus" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+          </div>
+        </div>
+        <div class="p-4 grid gap-3 max-h-[70vh] overflow-auto">
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="text-sm text-slate-100">玩家提交狀態</div>
+            <div id="readyList" class="mt-2 grid gap-2"></div>
+          </section>
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="text-sm text-slate-100">結果表（對莊家）</div>
+            <div class="mt-2 overflow-auto">
+              <table class="w-full text-sm">
+                <thead class="text-emerald-100/80">
+                  <tr class="border-b border-white/10">
+                    <th class="text-left py-2">玩家</th>
+                    <th class="text-left py-2">選莊</th>
+                    <th class="text-left py-2">頭</th>
+                    <th class="text-left py-2">中</th>
+                    <th class="text-left py-2">尾</th>
+                    <th class="text-left py-2">報到</th>
+                    <th class="text-left py-2">本局</th>
+                    <th class="text-left py-2">累計</th>
+                    <th class="text-left py-2">備註</th>
+                  </tr>
+                </thead>
+                <tbody id="scoreBody" class="text-slate-50"></tbody>
+              </table>
+            </div>
+            <p class="mt-2 text-xs text-emerald-100/70">完整牌組與牌型請看「結算彈窗」。</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report Modal -->
+  <div id="reportModal" class="hidden fixed inset-0 z-[52]">
+    <div class="absolute inset-0 backdrop" id="reportBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-3">
+      <div class="w-full sm:max-w-xl rounded-2xl panel border border-amber-200/20 modal-in">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">報到（可選）</div>
+            <div class="mt-1 text-lg font-black tracking-tight">本局報到</div>
+            <div class="mt-1 text-xs text-emerald-100/70">選擇報到後提交；房主會驗證符合才加分（不符會標註「報到不符」）。報到者本局只計算報到分數。</div>
+          </div>
+          <button id="btnCloseReport" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+        </div>
+        <div class="p-4 grid gap-2">
+          <div class="text-xs text-emerald-100/70">已改為在「排牌 / 提交」視窗內選擇報到。</div>
+        </div>
+        <div class="p-4 border-t border-white/10 flex items-center justify-between gap-2">
+          <div class="text-xs text-emerald-100/70">報到只在你提交時一起送出。</div>
+          <button id="btnCloseReport2" class="text-xs px-3 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-semibold hover:brightness-105">好</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dealer Pick (Pre-Reveal) Modal: after all submitted, before reveal -->
+  <div id="dealerPickPreModal" class="hidden fixed inset-0 z-[54]">
+    <div class="absolute inset-0 backdrop" id="dealerPickPreBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-3">
+      <div class="w-full sm:max-w-2xl rounded-2xl panel border border-amber-200/20 modal-in">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">結算前指定莊家</div>
+            <div id="dealerPickPreTitle" class="mt-1 text-lg font-black tracking-tight">—</div>
+            <div id="dealerPickPreDesc" class="mt-1 text-xs text-emerald-100/70">—</div>
+          </div>
+          <button id="btnCloseDealerPickPre" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+        </div>
+
+        <div class="p-4 grid gap-3 max-h-[70vh] overflow-auto">
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold">各玩家選莊牌</div>
+              <div class="text-xs text-emerald-100/70">你可根據每人的選莊牌決定莊家</div>
+            </div>
+            <div id="dealerPickPreCards" class="mt-2 grid gap-2"></div>
+          </section>
+
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="font-semibold">請選擇莊家</div>
+            <div id="dealerPickPreList" class="mt-2 grid gap-2"></div>
+          </section>
+        </div>
+
+        <div class="p-4 border-t border-white/10 flex items-center justify-between gap-2">
+          <div class="text-xs text-emerald-100/70">提示：若有大鬼，本局由大鬼玩家決定；否則由細鬼玩家決定。</div>
+          <button id="btnDealerPickPreConfirm" class="text-xs px-3 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-semibold hover:brightness-105">確定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Modal (repurposed from Log) -->
+  <div id="logModal" class="hidden fixed inset-0 z-[52]">
+    <div class="absolute inset-0 backdrop" id="logBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-3">
+      <div class="w-full sm:max-w-2xl rounded-2xl panel border border-amber-200/20 modal-in">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">聊天室</div>
+            <div class="mt-1 text-lg font-black tracking-tight">Chat</div>
+            <div class="mt-1 text-[11px] text-emerald-100/70">提示：有新訊息時，底部「聊天」會閃爍。</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btnClearGameLog" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">清空</button>
+            <button id="btnCloseLog" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+          </div>
+        </div>
+
+        <div class="p-4 grid gap-3 max-h-[70vh] overflow-auto">
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="text-xs text-emerald-100/70">訊息</div>
+            <div id="gameLog" class="mt-2 text-xs text-emerald-50/90 space-y-1 max-h-[42vh] overflow-auto pr-1"></div>
+          </section>
+
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="text-xs text-emerald-100/70">快捷句</div>
+            <div id="chatQuick" class="mt-2 flex flex-wrap gap-2">
+              <button type="button" data-msg="屌你老母又Pair煙" class="text-[11px] px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">屌你老母又Pair煙</button>
+              <button type="button" data-msg="師傅你真係好撚正" class="text-[11px] px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">師傅你真係好撚正</button>
+              <button type="button" data-msg="贏撚完未呀" class="text-[11px] px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">贏撚完未呀</button>
+              <button type="button" data-msg="幾撚時死呀?" class="text-[11px] px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">幾撚時死呀?</button>
+              <button type="button" data-msg="執幾撚耐呀" class="text-[11px] px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">執幾撚耐呀</button>
+            </div>
+          </section>
+
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="text-xs text-emerald-100/70">輸入</div>
+            <div class="mt-2 flex items-center gap-2">
+              <input id="inpChat" maxlength="200" class="flex-1 bg-black/35 border border-white/10 rounded-xl px-3 py-2 outline-none focus:border-amber-200/50" placeholder="輸入訊息…（Enter 發送）" />
+              <button id="btnSendChat" class="shrink-0 text-xs px-3 py-2 rounded-xl bg-gradient-to-b from-sky-400 to-sky-500 text-sky-950 font-semibold hover:brightness-105">發送</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrange Modal (your hand arrangement) -->
+  <div id="arrangeModal" class="hidden fixed inset-0 z-[53]">
+    <div class="absolute inset-0 backdrop" id="arrangeBackdrop"></div>
+    <!-- Compact layout for landscape: reserve space for the Hand Dock -->
+    <div class="absolute inset-0 flex items-start justify-center p-0 pb-20">
+      <div class="w-full sm:max-w-5xl rounded-2xl panel border border-amber-200/20 modal-in flex flex-col max-h-full overflow-hidden">
+        <div class="p-1 border-b border-white/10 flex items-center justify-end gap-1.5">
+          <div class="sr-only">排牌 / 提交</div>
+          <button id="btnAutoFill" class="text-[10px] px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">快速排</button>
+          <button id="btnResetArrange" class="text-[10px] px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">重排</button>
+          <button id="btnCloseArrange" class="text-[10px] px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+        </div>
+
+        <div class="p-1 flex-1 overflow-auto">
+          <div class="rounded-xl bg-black/15 border border-white/10 p-1">
+            <div class="grid gap-1">
+              <!-- Head + Dealer (dealer on the right) -->
+              <div class="flex items-start gap-[2px]">
+                <div class="min-w-[52px]">
+                  <div class="text-[11px] text-emerald-100/80 leading-none">頭（2）</div>
+                  <div id="headEval" class="text-[10px] text-emerald-100/70 leading-none">—</div>
+                </div>
+                <div id="slotHead" class="grid grid-cols-2 gap-0 shrink-0 items-center"></div>
+
+                <div class="w-[50px] sm:w-[56px] shrink-0">
+                  <div id="dealerCardSlot" class="h-[62px] w-[44px] sm:h-[70px] sm:w-[50px] rounded-md border border-amber-200/20 bg-black/20 p-[1px]"></div>
+                </div>
+              </div>
+
+              <!-- Mid -->
+              <div class="flex items-start gap-[2px]">
+                <div class="min-w-[52px]">
+                  <div class="text-[11px] text-emerald-100/80 leading-none">中（3）</div>
+                  <div id="midEval" class="text-[10px] text-emerald-100/70 leading-none">—</div>
+                </div>
+                <div id="slotMid" class="grid grid-cols-3 gap-0 shrink-0 items-center"></div>
+              </div>
+
+              <!-- Tail -->
+              <div class="flex items-start gap-[2px]">
+                <div class="min-w-[52px]">
+                  <div class="text-[11px] text-emerald-100/80 leading-none">尾（3）</div>
+                  <div id="tailEval" class="text-[10px] text-emerald-100/70 leading-none">—</div>
+                </div>
+                <div id="slotTail" class="grid grid-cols-3 gap-0 shrink-0 items-center"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fixed footer: ultra-compact report + submit (single line) -->
+        <div class="p-1.5 border-t border-white/10">
+          <div class="flex items-center gap-1.5">
+            <div class="text-[10px] text-emerald-100/80 shrink-0">報到</div>
+            <select id="selReport" class="flex-1 bg-black/35 border border-white/10 rounded-xl px-2 py-1 text-[10px] outline-none focus:border-amber-200/50">
+              <option value="none">不報</option>
+              <option value="allRed">全紅 +5（全紅色牌）</option>
+              <option value="allBlack">全黑 +5（全黑色牌）</option>
+              <option value="threeSnake">三蛇 +3（三順子）</option>
+              <option value="fourKind">4條 +10（鐵支）</option>
+              <option value="fourPairs">4對 +10（四對子）</option>
+              <option value="mixedDragon">雜龍 +15（牌順序由小至大）</option>
+              <option value="threeStraightFlush">3同花順 +25（三同花順）</option>
+              <option value="twoFourKind">2個4條 +30（2對鐵支）</option>
+              <option value="greenDragon">青龍 +100（一樣顏色牌順序由小至大）</option>
+              <option value="noHand">百無 +3（3高牌）</option>
+            </select>
+            <button id="btnSubmit" class="shrink-0 px-3 py-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 hover:brightness-105 font-black text-[11px]">提交</button>
+            <div class="text-[10px] text-emerald-50/80 shrink-0">狀態：<span id="submitStatus2">—</span></div>
+          </div>
+        </div>
+
+        <div class="hidden p-4 border-t border-white/10 items-center justify-between gap-2">
+          <div class="text-xs text-emerald-100/70">提示：手牌在底部，可直接互換放入。</div>
+          <button id="btnCloseArrange2" class="text-xs px-3 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-semibold hover:brightness-105">好</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reveal Modal -->
+  <div id="revealModal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 backdrop" id="revealBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-2">
+      <div class="w-full sm:max-w-5xl rounded-2xl panel border border-amber-200/20">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">本局結算</div>
+            <div class="mt-1 text-lg font-black tracking-tight">
+              第 <span id="revealRound" class="mono">—</span> 局｜莊家：<span id="revealDealer" class="font-black">—</span>
+            </div>
+            <div class="mt-1 text-xs text-emerald-100/70">提示：頭墩對子以點數計分；中墩同花順+10/三條+6；尾墩同花順+5/三條+3。擺烏龍/報到不符會在結算時處理。</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btnCloseReveal" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+          </div>
+        </div>
+
+        <div class="p-3 sm:p-4 grid gap-2 max-h-[64vh] overflow-auto">
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold">分數總覽</div>
+              <div class="text-xs text-emerald-100/70">本局 vs 莊家（莊家為淨值）</div>
+            </div>
+            <div class="mt-2 overflow-auto max-h-[34vh]">
+              <table class="w-full text-sm">
+                <thead class="text-emerald-100/80">
+                  <tr class="border-b border-white/10">
+                    <th class="text-left py-2">玩家</th>
+                    <th class="text-left py-2">選莊</th>
+                    <th class="text-left py-2">頭</th>
+                    <th class="text-left py-2">中</th>
+                    <th class="text-left py-2">尾</th>
+                    <th class="text-left py-2">報到</th>
+                    <th class="text-left py-2">本局</th>
+                    <th class="text-left py-2">累計</th>
+                    <th class="text-left py-2">備註</th>
+                  </tr>
+                </thead>
+                <tbody id="revealScoreBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <details class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <summary class="cursor-pointer select-none flex items-center justify-between gap-2">
+              <div class="font-semibold">每位玩家牌組（點此展開）</div>
+              <div class="text-xs text-emerald-100/70">選莊牌 + 頭/中/尾 + 報到</div>
+            </summary>
+            <div id="revealHands" class="mt-3 grid gap-2"></div>
+          </details>
+        </div>
+
+        <div class="p-4 border-t border-white/10 flex items-center justify-between gap-2">
+          <div class="text-xs text-emerald-100/70">可按右上角關閉；房主可在主畫面按「下一局」。</div>
+          <button id="btnCloseReveal2" class="text-xs px-3 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-semibold hover:brightness-105">好</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden compatibility nodes (kiosk UI removed but JS still expects these ids) -->
+  <div class="hidden">
+    <div id="gameRoleBadge"></div>
+    <div id="gameRoomId"></div>
+    <div id="gameRoundInfo"></div>
+    <div id="dealerName"></div>
+    <span id="myCumulative">0</span>
+    <button id="btnOpenLastReveal" type="button"></button>
+    <button id="btnOpenArrange" type="button"></button>
+    <button id="btnBackToLobby" type="button"></button>
+    <input id="inpCustomRoomId" />
+  </div>
+
+  <script>
+    /**
+     * HKE九張 原型：
+     * - P2P（PeerJS）
+     * - 房主作為權威：玩家列表、局數、發牌、結算。
+     * - 每局每人 9 張：玩家自由選 1 張作「選莊牌」，剩下 8 張排成：頭 2 / 中 3 / 尾 3。
+     * - 大鬼細鬼（JOKER）作百搭，結算以 2 張（頭）/ 3 張（中尾）牌型（簡化）比較。
+     * - 擺烏龍：頭 > 中 或 中 > 尾（允許提交；結算時按規則處理）。
+     * - 結算用彈窗顯示詳細牌組；並提供跨回合累計分數。
+     */
+
+    // -------------------- UI helpers --------------------
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, txt) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (txt !== undefined) n.textContent = txt;
+      return n;
+    };
+    const nowTime = () => new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+    const log = (msg) => {
+      const line = el('div', 'text-emerald-50/80', `[${nowTime()}] ${msg}`);
+      $('log').prepend(line);
+    };
+    // Chat log: only keep real chat messages (system/game info should not be here)
+    const glog = (msg, opts={}) => {
+      if (!opts?.chat) return; // hide game/system info in chat
+
+      const line = el('div', 'text-emerald-50/90', `[${nowTime()}] ${msg}`);
+      $('gameLog').prepend(line);
+
+      const chatOpen = !$('logModal').classList.contains('hidden');
+      if (!chatOpen) {
+        clientState.chatUnread = true;
+        updateChatUnread();
+      }
+    };
+    const toast = async (msg) => {
+      const t = el('div', 'fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] px-3 py-2 rounded-xl bg-black/70 border border-amber-200/20 text-xs text-amber-50 shadow-lg backdrop-blur', msg);
+      document.body.appendChild(t);
+      await new Promise(r => setTimeout(r, 1700));
+      t.remove();
+    };
+    const setBadge = (online, text) => {
+      $('netBadge').textContent = text;
+      $('netBadge').className = 'text-xs px-2 py-1 rounded-full chip ' + (online
+        ? 'text-emerald-50 border-emerald-300/30 bg-emerald-500/15'
+        : 'text-amber-100 border-amber-300/25 bg-amber-300/10');
+    };
+
+    function showPage(which) {
+      const lobby = $('pageLobby');
+      const game = $('pageGame');
+      const goLobby = $('btnGoLobby');
+      if (which === 'lobby') {
+        lobby.classList.remove('hidden');
+        game.classList.add('hidden');
+        goLobby.classList.add('hidden');
+      } else {
+        lobby.classList.add('hidden');
+        game.classList.remove('hidden');
+        goLobby.classList.remove('hidden');
+      }
+      updateBodyOverflow();
+    }
+
+    function updateBodyOverflow() {
+      const ids = ['revealModal','gameOverModal','statusModal','reportModal','logModal','dealerPickPreModal','arrangeModal'];
+      const anyOpen = ids.some(id => {
+        const n = $(id);
+        return n && !n.classList.contains('hidden');
+      });
+      document.body.style.overflow = anyOpen ? 'hidden' : '';
+
+      // Hide "回大廳" while any modal is open to avoid blocking modal buttons
+      const goLobby = $('btnGoLobby');
+      if (goLobby) {
+        const inGame = !$('pageGame').classList.contains('hidden');
+        goLobby.classList.toggle('hidden', anyOpen || !inGame);
+      }
+
+      // Hand Dock: only show while Arrange modal is open
+      const arrangeOpen = !$('arrangeModal')?.classList.contains('hidden');
+      const dockHideIds = ['revealModal','gameOverModal','statusModal','reportModal','logModal','dealerPickPreModal'];
+      const otherModalOpen = dockHideIds.some(id => {
+        const n = $(id);
+        return n && !n.classList.contains('hidden');
+      });
+      const hideDock = !arrangeOpen || otherModalOpen;
+
+      const handDock = $('handDock');
+      if (handDock) {
+        handDock.classList.toggle('hidden', hideDock);
+        // While arranging, hide bottom bar and move handDock to the very bottom
+        handDock.style.bottom = arrangeOpen && !otherModalOpen ? '0px' : '';
+      }
+
+      const bottomBar = $('bottomBar');
+      if (bottomBar) bottomBar.classList.toggle('hidden', arrangeOpen);
+    }
+
+    // -------------------- Modal helpers --------------------
+    function openRevealModal(payload) {
+      if (!payload) return;
+      clientState.lastReveal = payload;
+      $('btnOpenLastReveal').classList.remove('hidden');
+
+      $('revealRound').textContent = String(payload.round || '—');
+      $('revealDealer').textContent = payload.dealerId ? getNameById(payload.dealerId) : '—';
+
+      // score table
+      const body = $('revealScoreBody');
+      body.innerHTML = '';
+      const players = payload.players || [];
+      const dealerId = payload.dealerId;
+      const results = payload.results || {};
+      const subs = payload.submissions || {};
+      const cumulative = payload.cumulative || {};
+
+      const sorted = [...players].sort((a,b) => {
+        if (a.id === dealerId) return -1;
+        if (b.id === dealerId) return 1;
+        return (results[b.id]?.total||0) - (results[a.id]?.total||0);
+      });
+
+      const mkScoreCell = (v) => {
+        const s = v>0 ? `+${v}` : String(v);
+        const cls = v>0 ? 'text-emerald-200' : (v<0 ? 'text-rose-200' : 'text-emerald-50/80');
+        return el('td', `py-2 pr-2 mono ${cls}`, s);
+      };
+
+      for (const p of sorted) {
+        const r = results[p.id] || {per:{head:0,mid:0,tail:0}, total:0, note:'', report:'none'};
+        const sub = subs[p.id];
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-white/5 align-top';
+
+        const tdName = el('td','py-2 pr-2');
+        tdName.appendChild(el('div','text-sm text-slate-50', p.name + (p.id===dealerId?'（莊）':'')));
+        tdName.appendChild(el('div','text-[10px] text-emerald-100/70 mono', p.id));
+
+        const tdDealer = el('td','py-2 pr-2 text-xs text-slate-50', sub?.dealerCard ? cardLabel(sub.dealerCard) : '—');
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdDealer);
+        tr.appendChild(mkScoreCell(r.per?.head||0));
+        tr.appendChild(mkScoreCell(r.per?.mid||0));
+        tr.appendChild(mkScoreCell(r.per?.tail||0));
+
+        const tdSpecial = el('td','py-2 pr-2 text-xs text-emerald-50/80');
+        tdSpecial.textContent = r.report==='none' ? '—' : specialLabel(r.report);
+
+        const tdRound = el('td','py-2 pr-2 font-black mono', String(r.total||0));
+        tdRound.classList.add((r.total||0)>0 ? 'text-emerald-200' : ((r.total||0)<0 ? 'text-rose-200' : 'text-emerald-50/80'));
+
+        const cumVal = Number(cumulative[p.id] || 0);
+        const tdCum = el('td','py-2 pr-2 font-black mono', String(cumVal));
+        tdCum.classList.add(cumVal>0 ? 'text-emerald-200' : (cumVal<0 ? 'text-rose-200' : 'text-emerald-50/80'));
+
+        tr.appendChild(tdSpecial);
+        tr.appendChild(tdRound);
+        tr.appendChild(tdCum);
+        tr.appendChild(el('td','py-2 pr-2 text-xs text-emerald-50/70', r.note || ''));
+
+        body.appendChild(tr);
+      }
+
+      // hands detail
+      const hands = $('revealHands');
+      hands.innerHTML = '';
+      for (const p of sorted) {
+        const sub = subs[p.id];
+        if (!sub) continue;
+        const box = el('div','rounded-2xl bg-black/25 border border-white/10 p-3');
+        const top = el('div','flex items-start justify-between gap-3');
+        const left = el('div','min-w-0');
+        left.appendChild(el('div','text-sm font-semibold text-slate-50 truncate', p.name + (p.id===dealerId?'（莊）':'')));
+        left.appendChild(el('div','text-[10px] text-emerald-100/70 mono truncate', p.id));
+        const right = el('div','text-right');
+        const round = Number(results[p.id]?.total || 0);
+        const cum = Number(cumulative[p.id] || 0);
+        const line1 = el('div','text-xs', `本局：${round>0?'+':''}${round}`);
+        line1.classList.add(round>0 ? 'text-emerald-200' : (round<0 ? 'text-rose-200' : 'text-emerald-50/80'));
+        const line2 = el('div','text-xs', `累計：${cum>0?'+':''}${cum}`);
+        line2.classList.add(cum>0 ? 'text-emerald-200' : (cum<0 ? 'text-rose-200' : 'text-emerald-50/80'));
+        right.appendChild(line1);
+        right.appendChild(line2);
+        top.appendChild(left);
+        top.appendChild(right);
+        box.appendChild(top);
+
+        const mkRow = (label, cards, evalName) => {
+          const row = el('div','mt-2 grid gap-1');
+          const title = el('div','text-xs text-emerald-100/80', label + (evalName ? `｜${evalName}` : ''));
+          const cardsLine = el('div','text-sm text-slate-50');
+          cardsLine.textContent = (cards||[]).map(cardLabel).join('  ');
+          row.appendChild(title);
+          row.appendChild(cardsLine);
+          return row;
+        };
+
+        const eHead = eval2(sub.head);
+        const eMid = eval3(sub.mid);
+        const eTail = eval3(sub.tail);
+
+        box.appendChild(mkRow('選莊牌', [sub.dealerCard], ''));
+        box.appendChild(mkRow('頭墩', sub.head, eHead.name));
+        box.appendChild(mkRow('中墩', sub.mid, eMid.name));
+        box.appendChild(mkRow('尾墩', sub.tail, eTail.name));
+
+        if ((sub.report||'none') !== 'none') {
+          box.appendChild(el('div','mt-2 text-xs text-emerald-100/70', `報到：${specialLabel(sub.report)}`));
+        }
+
+        hands.appendChild(box);
+      }
+
+      // show modal
+      $('revealModal').classList.remove('hidden');
+      updateBodyOverflow();
+    }
+
+    function closeRevealModal() {
+      $('revealModal').classList.add('hidden');
+      updateBodyOverflow();
+
+      // If final-round summary is pending, show it after closing reveal
+      if (clientState.pendingGameOver) {
+        const payload = clientState.pendingGameOver;
+        clientState.pendingGameOver = null;
+        openGameOverModal(payload);
+      }
+    }
+
+    // -------------------- Arrange modal --------------------
+    function syncArrangeSubmitStatus() {
+      const t = $('submitStatus')?.textContent || '—';
+      const n = $('submitStatus2');
+      if (n) n.textContent = t;
+    }
+
+    function openArrangeModal() {
+      syncArrangeSubmitStatus();
+      $('arrangeModal').classList.remove('hidden');
+      updateBodyOverflow();
+      // ensure slots are rendered when opening
+      try { renderGameHeader(); renderSlots(); renderHand(); } catch {}
+    }
+
+    function closeArrangeModal() {
+      $('arrangeModal').classList.add('hidden');
+      updateBodyOverflow();
+    }
+
+    // -------------------- Status/Report/Log modals --------------------
+    function openStatusModal() {
+      // Render latest lists before showing (avoid "卡住" due to empty content)
+      $('statusRound').textContent = String(isHost ? hostState.round : clientState.round) || '—';
+      try {
+        renderReadyList(isHost ? readyMapForBroadcast() : null);
+      } catch {}
+      try {
+        if (clientState.lastReveal) renderScores(clientState.lastReveal);
+      } catch {}
+      $('statusModal').classList.remove('hidden');
+      updateBodyOverflow();
+      updateMidActionButton();
+    }
+    function closeStatusModal() {
+      $('statusModal').classList.add('hidden');
+      updateBodyOverflow();
+    }
+
+    function openReportModal() {
+      // Report selection is now inside Arrange modal
+      openArrangeModal();
+      setTimeout(() => {
+        try { $('selReport')?.scrollIntoView({behavior:'smooth', block:'center'}); } catch {}
+      }, 60);
+    }
+    function closeReportModal() {
+      $('reportModal').classList.add('hidden');
+      updateBodyOverflow();
+    }
+
+    function updateChatUnread() {
+      const btn = $('btnOpenLog');
+      if (!btn) return;
+      const open = !$('logModal').classList.contains('hidden');
+      btn.classList.toggle('chat-unread', !!clientState.chatUnread && !open);
+    }
+
+    function openLogModal() {
+      $('logModal').classList.remove('hidden');
+      // opening chat clears unread
+      clientState.chatUnread = false;
+      updateChatUnread();
+      updateBodyOverflow();
+      // scroll chat list to top (newest first) – prepend already
+      try { $('inpChat').focus(); } catch {}
+    }
+    function closeLogModal() {
+      $('logModal').classList.add('hidden');
+      updateBodyOverflow();
+      updateChatUnread();
+    }
+
+    function sendChatText(text) {
+      const t = String(text || '').trim();
+      if (!t) return;
+
+      const myName = clientState.myName || '我';
+
+      // For players, ensure connected before showing locally (avoid "sent but not actually sent")
+      if (!isHost) {
+        if (!clientConn || !clientState.connected) {
+          toast('尚未連線到房主');
+          return;
+        }
+      }
+
+      // append locally (chat only)
+      glog(`${myName}：${t}`, {chat:true});
+
+      // send to network
+      if (isHost) {
+        broadcast({t:'chat', from: myName, fromId: hostId, text: t});
+      } else {
+        send(clientConn, {t:'chat', from: myName, fromId: myId, text: t});
+      }
+    }
+
+    function spawnDanmaku(text, from='') {
+      const root = $('danmaku');
+      if (!root) return;
+      root.classList.remove('hidden');
+
+      const msg = String(text || '').trim();
+      if (!msg) return;
+
+      const line = document.createElement('div');
+      line.className = 'danmaku-item';
+      const who = from ? `${from}：` : '';
+      line.textContent = who + msg;
+
+      // random track
+      const tracks = 8;
+      const h = window.innerHeight;
+      const topMin = 72;
+      const topMax = Math.max(topMin, h - 180);
+      const top = topMin + Math.floor(Math.random() * (topMax - topMin));
+      line.style.top = top + 'px';
+
+      const duration = 6500 + Math.random() * 2500;
+      line.style.animation = `danmakuFly ${duration}ms linear forwards`;
+
+      root.appendChild(line);
+
+      const cleanup = () => {
+        try { line.remove(); } catch {}
+        if (root.childElementCount === 0) root.classList.add('hidden');
+      };
+      line.addEventListener('animationend', cleanup);
+      // safety cleanup
+      setTimeout(cleanup, duration + 200);
+    }
+
+    function sendDanmakuText(text) {
+      const t = String(text || '').trim();
+      if (!t) return;
+
+      const myName = clientState.myName || '我';
+
+      // must be connected if player
+      if (!isHost) {
+        if (!clientConn || !clientState.connected) {
+          toast('尚未連線到房主');
+          return;
+        }
+      }
+
+      // show locally immediately
+      spawnDanmaku(t, myName);
+
+      // send to network
+      if (isHost) {
+        broadcast({t:'danmaku', from: myName, fromId: hostId, text: t});
+      } else {
+        send(clientConn, {t:'danmaku', from: myName, fromId: myId, text: t});
+      }
+    }
+
+    // -------------------- Seat prank: poop (throw) --------------------
+    function seatCenter(pid) {
+      const n = document.getElementById('seatBadge_' + pid);
+      if (!n) return null;
+      const r = n.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    async function spawnPoopThrow(fromId, targetId) {
+      const from = seatCenter(fromId);
+      const to = seatCenter(targetId);
+      if (!from || !to) {
+        spawnPoopOnSeat(targetId);
+        return;
+      }
+
+      const node = document.createElement('div');
+      node.className = 'poop-throw';
+      node.textContent = '💩';
+      document.body.appendChild(node);
+
+      const duration = 520;
+      const start = performance.now();
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const peak = -Math.min(180, 90 + Math.hypot(dx, dy) * 0.15);
+
+      function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+      return await new Promise((resolve) => {
+        function tick(now) {
+          const t = Math.min(1, (now - start) / duration);
+          const e = easeOutCubic(t);
+
+          const x = from.x + dx * e;
+          const y = from.y + dy * e + peak * (4 * e * (1 - e));
+          const rot = 720 * e;
+
+          node.style.left = x + 'px';
+          node.style.top = y + 'px';
+          node.style.transform = `translate(-50%, -50%) rotate(${rot}deg) scale(${0.9 + 0.2 * (1 - Math.abs(0.5 - e) * 2)})`;
+
+          if (t < 1) {
+            requestAnimationFrame(tick);
+          } else {
+            try { node.remove(); } catch {}
+            spawnPoopOnSeat(targetId);
+            resolve();
+          }
+        }
+        requestAnimationFrame(tick);
+      });
+    }
+
+    function spawnPoopOnSeat(targetId) {
+      const box = document.getElementById('seatBadge_' + targetId);
+      if (!box) return;
+      // overlay inside the seat badge
+      const poop = document.createElement('div');
+      poop.className = 'poop-item';
+      poop.textContent = '💩';
+      box.appendChild(poop);
+      setTimeout(() => {
+        try { poop.remove(); } catch {}
+      }, 980);
+    }
+
+    function sendPoopTo(targetId) {
+      const tid = String(targetId || '');
+      if (!tid) return;
+
+      const fromId = isHost ? hostId : myId;
+      const fromName = clientState.myName || '我';
+
+      // must be connected if player
+      if (!isHost) {
+        if (!clientConn || !clientState.connected) {
+          toast('尚未連線到房主');
+          return;
+        }
+      }
+
+      // play locally immediately (throw)
+      spawnPoopThrow(fromId, tid);
+
+      // send to network
+      if (isHost) {
+        broadcast({t:'poop', from: fromName, fromId, targetId: tid});
+      } else {
+        send(clientConn, {t:'poop', from: fromName, fromId, targetId: tid});
+      }
+    }
+
+    // -------------------- Dealer Pick (Pre-Reveal) --------------------
+    let dealerPickPreSelectedId = null;
+    let dealerPickPreCtx = null; // {kind, controllerId, submissions, players}
+
+    function renderDealerPickPreLists() {
+      if (!dealerPickPreCtx) return;
+      const ctx = dealerPickPreCtx;
+
+      // Render dealer cards list
+      const cardsRoot = $('dealerPickPreCards');
+      cardsRoot.innerHTML = '';
+      const subs = ctx?.submissions || {};
+      const players = ctx?.players || [];
+      for (const p of players) {
+        const sub = subs[p.id];
+        const row = el('div','flex items-center justify-between gap-2 rounded-xl bg-black/25 border border-white/10 px-3 py-2');
+        const left = el('div','min-w-0');
+        left.appendChild(el('div','text-sm text-slate-50 truncate', p.name));
+        left.appendChild(el('div','text-[10px] text-emerald-100/70 mono truncate', p.id));
+        const right = el('div','text-sm font-black text-amber-100');
+        right.textContent = sub?.dealerCard ? cardLabel(sub.dealerCard) : '—';
+        row.appendChild(left);
+        row.appendChild(right);
+        cardsRoot.appendChild(row);
+      }
+
+      // Render choose dealer list
+      const listRoot = $('dealerPickPreList');
+      listRoot.innerHTML = '';
+      for (const p of players) {
+        const row = el('button','text-left w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 hover:bg-black/25');
+        row.type = 'button';
+        const top = el('div','flex items-center justify-between gap-2');
+        top.appendChild(el('div','text-sm text-slate-50 truncate', p.name));
+        const badge = el('div','text-xs px-2 py-1 rounded-full border');
+        const selected = dealerPickPreSelectedId === p.id;
+        badge.className = 'text-xs px-2 py-1 rounded-full border ' + (selected
+          ? 'bg-amber-400/15 border-amber-200/30 text-amber-100'
+          : 'bg-white/5 border-white/10 text-emerald-50/70');
+        badge.textContent = selected ? '已選' : '點選';
+        top.appendChild(badge);
+        row.appendChild(top);
+        row.appendChild(el('div','text-[10px] text-emerald-100/70 mono mt-1 truncate', p.id));
+        row.addEventListener('click', (e) => {
+          e.preventDefault();
+          dealerPickPreSelectedId = p.id;
+          renderDealerPickPreLists();
+        });
+        listRoot.appendChild(row);
+      }
+    }
+
+    function openDealerPickPreModal(ctx) {
+      dealerPickPreCtx = ctx;
+      dealerPickPreSelectedId = ctx?.currentDealerId || dealerPickPreSelectedId || null;
+
+      const isBig = ctx?.kind === 'BJ';
+      $('dealerPickPreTitle').textContent = isBig ? '你持有大鬼（本局你可指定莊家）' : '你持有細鬼（本局你可指定莊家）';
+      $('dealerPickPreDesc').textContent = isBig
+        ? '請先查看各玩家選莊牌，然後指定本局莊家。'
+        : '請先查看各玩家選莊牌，然後指定本局莊家（若有人持有大鬼，你將不會看到此畫面）。';
+
+      renderDealerPickPreLists();
+
+      $('dealerPickPreModal').classList.remove('hidden');
+      updateBodyOverflow();
+    }
+
+    function closeDealerPickPreModal() {
+      $('dealerPickPreModal').classList.add('hidden');
+      updateBodyOverflow();
+    }
+
+    function hasAnyJokerDealerCard(submissions) {
+      for (const id in (submissions || {})) {
+        const dc = submissions[id]?.dealerCard;
+        if (dc?.s === 'J') return true;
+      }
+      return false;
+    }
+
+    function findDealerPickController(submissions) {
+      // Returns {controllerId, kind:'BJ'|'SJ'} or null
+      const ids = Object.keys(submissions || {});
+      const big = ids.filter(id => submissions[id]?.dealerCard?.s==='J' && submissions[id].dealerCard.j==='BJ');
+      if (big.length) {
+        // pick deterministic: smallest id
+        big.sort();
+        return {controllerId: big[0], kind:'BJ'};
+      }
+      const small = ids.filter(id => submissions[id]?.dealerCard?.s==='J' && submissions[id].dealerCard.j==='SJ');
+      if (small.length) {
+        small.sort();
+        return {controllerId: small[0], kind:'SJ'};
+      }
+      return null;
+    }
+
+    // -------------------- Game Over modal + confetti --------------------
+    let confettiTimer = null;
+
+    function resizeConfetti() {
+      const c = $('confetti');
+      if (!c) return;
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      c.width = Math.floor(window.innerWidth * dpr);
+      c.height = Math.floor(window.innerHeight * dpr);
+      c._dpr = dpr;
+    }
+
+    function startConfetti(ms=2200) {
+      const c = $('confetti');
+      if (!c) return;
+      resizeConfetti();
+      c.classList.remove('hidden');
+      const ctx = c.getContext('2d');
+      const dpr = c._dpr || 1;
+
+      const colors = ['#facc15', '#34d399', '#60a5fa', '#f472b6', '#fb7185', '#a78bfa'];
+      const N = 110;
+      const parts = Array.from({length:N}, () => ({
+        x: Math.random()*window.innerWidth,
+        y: -20 - Math.random()*window.innerHeight*0.3,
+        vy: 1.2 + Math.random()*2.6,
+        vx: -1.2 + Math.random()*2.4,
+        r: 2 + Math.random()*4,
+        rot: Math.random()*Math.PI,
+        vr: (-0.2 + Math.random()*0.4),
+        color: colors[Math.floor(Math.random()*colors.length)],
+        life: 0,
+      }));
+
+      let start = performance.now();
+      function tick(t) {
+        const elapsed = t - start;
+        ctx.clearRect(0,0,c.width,c.height);
+        ctx.save();
+        ctx.scale(dpr,dpr);
+
+        for (const p of parts) {
+          p.life += 1;
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.02;
+          p.rot += p.vr;
+
+          // wrap sides
+          if (p.x < -20) p.x = window.innerWidth + 20;
+          if (p.x > window.innerWidth + 20) p.x = -20;
+
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.r, -p.r*0.6, p.r*2, p.r*1.2);
+          ctx.restore();
+        }
+
+        ctx.restore();
+        if (elapsed < ms) {
+          confettiTimer = requestAnimationFrame(tick);
+        } else {
+          stopConfetti();
+        }
+      }
+      stopConfetti();
+      confettiTimer = requestAnimationFrame(tick);
+    }
+
+    function stopConfetti() {
+      if (confettiTimer) {
+        cancelAnimationFrame(confettiTimer);
+        confettiTimer = null;
+      }
+      const c = $('confetti');
+      if (c) {
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0,0,c.width,c.height);
+        c.classList.add('hidden');
+      }
+    }
+
+    function openGameOverModal(payload) {
+      if (!payload) return;
+      $('gameOverRoom').textContent = payload.roomId || (isHost ? (myId||'—') : (clientState.roomId||'—'));
+
+      const body = $('gameOverBody');
+      body.innerHTML = '';
+      const players = payload.players || [];
+      const cumulative = payload.cumulative || {};
+      const sorted = [...players].sort((a,b) => Number(cumulative[b.id]||0) - Number(cumulative[a.id]||0));
+
+      for (const p of sorted) {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-white/5 align-top';
+        const tdName = el('td','py-2 pr-2');
+        tdName.appendChild(el('div','text-sm text-slate-50', p.name));
+        tdName.appendChild(el('div','text-[10px] text-emerald-100/70 mono', p.id));
+        const v = Number(cumulative[p.id]||0);
+        const tdScore = el('td','py-2 pr-2 font-black mono', String(v));
+        tdScore.classList.add(v>0?'text-emerald-200':(v<0?'text-rose-200':'text-emerald-50/80'));
+        tr.appendChild(tdName);
+        tr.appendChild(tdScore);
+        body.appendChild(tr);
+      }
+
+      $('gameOverModal').classList.remove('hidden');
+      updateBodyOverflow();
+      startConfetti(2400);
+    }
+
+    function closeGameOverModal() {
+      $('gameOverModal').classList.add('hidden');
+      updateBodyOverflow();
+      stopConfetti();
+    }
+
+    window.addEventListener('resize', () => {
+      const c = $('confetti');
+      if (c && !c.classList.contains('hidden')) resizeConfetti();
+    });
+
+    // -------------------- Card model --------------------
+    const SUITS = ['S','H','D','C'];
+    const SUIT_ICON = {S:'♠', H:'♥', D:'♦', C:'♣'};
+    const SUIT_COLOR = {S:'text-slate-900', C:'text-slate-900', H:'text-rose-600', D:'text-rose-600'};
+
+    function makeDeck54() {
+      const deck = [];
+      for (const s of SUITS) {
+        for (let r=2;r<=14;r++) deck.push({r, s});
+      }
+      deck.push({r: 16, s:'J', j:'BJ'}); // 大鬼
+      deck.push({r: 15, s:'J', j:'SJ'}); // 細鬼
+      return deck;
+    }
+
+    function cardLabel(c) {
+      if (!c) return '—';
+      if (c.s === 'J') return c.j === 'BJ' ? '大鬼' : '細鬼';
+      const rank = c.r;
+      const rtxt = rank<=10 ? String(rank) : (rank===11?'J':rank===12?'Q':rank===13?'K':'A');
+      return `${rtxt}${SUIT_ICON[c.s]}`;
+    }
+
+    function cardKey(c) {
+      if (c.s==='J') return c.j;
+      return `${c.r}${c.s}`;
+    }
+
+    function compareSelectCard(a,b) {
+      // 大鬼/細鬼最高，其次點數，再比花色 S>H>D>C
+      const suitOrder = {S:4,H:3,D:2,C:1,J:5};
+      const ra = (a.s==='J') ? 100 : a.r;
+      const rb = (b.s==='J') ? 100 : b.r;
+      if (ra !== rb) return ra - rb;
+      return (suitOrder[a.s]||0) - (suitOrder[b.s]||0);
+    }
+
+    function shuffle(arr) {
+      for (let i=arr.length-1;i>0;i--) {
+        const j = Math.floor(Math.random()*(i+1));
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+      }
+      return arr;
+    }
+
+    // -------------------- 2-card / 3-card evaluation w/ 鬼牌 --------------------
+    function eval2(cards) {
+      const jokers = cards.filter(c => c?.s==='J').length;
+      if (jokers === 0) return eval2NoJoker(cards);
+
+      const base = cards.filter(c => c && c.s!=='J');
+      const used = new Set(base.map(cardKey));
+      const full = [];
+      for (const s of SUITS) {
+        for (let r=2;r<=14;r++) {
+          const k = `${r}${s}`;
+          if (!used.has(k)) full.push({r,s});
+        }
+      }
+
+      const best = {cat:-1, t:[], name:''};
+      const tryHand = (h) => {
+        const e = eval2NoJoker(h);
+        if (compareEval(e, best) > 0) {
+          best.cat = e.cat; best.t = e.t; best.name = e.name;
+        }
+      };
+
+      if (jokers === 1) {
+        for (const rep of full) tryHand(base.concat([rep]));
+      } else {
+        for (let i=0;i<full.length;i++) {
+          for (let j=i+1;j<full.length;j++) tryHand(base.concat([full[i], full[j]]));
+        }
+      }
+
+      return {cat: best.cat, t: best.t, name: best.name, usedJoker: true};
+    }
+
+    function eval2NoJoker(cards) {
+      const ranks = cards.map(c=>c.r).sort((a,b)=>b-a);
+      const uniq = [...new Set(ranks)];
+      if (uniq.length === 1) return {cat:1, t:[uniq[0]], name:'一對'};
+      return {cat:0, t:ranks, name:'高牌'};
+    }
+
+    function eval3(cards) {
+      const jokers = cards.filter(c => c.s==='J').length;
+      if (jokers === 0) return eval3NoJoker(cards);
+
+      const base = cards.filter(c => c.s!=='J');
+      const used = new Set(base.map(cardKey));
+      const full = [];
+      for (const s of SUITS) {
+        for (let r=2;r<=14;r++) {
+          const k = `${r}${s}`;
+          if (!used.has(k)) full.push({r,s});
+        }
+      }
+
+      const best = {cat:-1, t:[], name:''};
+      const tryHand = (h) => {
+        const e = eval3NoJoker(h);
+        if (compareEval(e, best) > 0) {
+          best.cat = e.cat; best.t = e.t; best.name = e.name;
+        }
+      };
+
+      if (jokers === 1) {
+        for (const rep of full) tryHand(base.concat([rep]));
+      } else {
+        for (let i=0;i<full.length;i++) {
+          for (let j=i+1;j<full.length;j++) tryHand(base.concat([full[i], full[j]]));
+        }
+      }
+
+      return {cat: best.cat, t: best.t, name: best.name, usedJoker: true};
+    }
+
+    function eval3NoJoker(cards) {
+      const ranks = cards.map(c=>c.r).sort((a,b)=>b-a);
+      const suits = cards.map(c=>c.s);
+      const isFlush = suits.every(s=>s===suits[0]);
+
+      const uniq = [...new Set(ranks)];
+      const counts = {};
+      for (const r of ranks) counts[r]=(counts[r]||0)+1;
+
+      const sortedAsc = [...ranks].sort((a,b)=>a-b);
+      let isStraight = false;
+      let straightHigh = Math.max(...ranks);
+      if (uniq.length === 3) {
+        if (sortedAsc[2]-sortedAsc[1]===1 && sortedAsc[1]-sortedAsc[0]===1) {
+          isStraight = true;
+          straightHigh = sortedAsc[2];
+        } else if (sortedAsc[0]===2 && sortedAsc[1]===3 && sortedAsc[2]===14) {
+          isStraight = true;
+          straightHigh = 3;
+        }
+      }
+
+      // 5 StraightFlush, 4 Trips, 3 Straight, 1 Pair, 0 High
+      if (isStraight && isFlush) return {cat:5, t:[straightHigh], name:'同花順'};
+      if (uniq.length === 1) return {cat:4, t:[uniq[0]], name:'三條'};
+      if (isStraight) return {cat:3, t:[straightHigh], name:'順子'};
+      if (uniq.length === 2) {
+        let pairRank = null, kicker = null;
+        for (const r in counts) {
+          if (counts[r]===2) pairRank = Number(r);
+          if (counts[r]===1) kicker = Number(r);
+        }
+        return {cat:1, t:[pairRank, kicker], name:'一對'};
+      }
+      return {cat:0, t:ranks, name:'高牌'};
+    }
+
+    function compareEval(a,b) {
+      if (a.cat !== b.cat) return a.cat - b.cat;
+      const len = Math.max(a.t.length, b.t.length);
+      for (let i=0;i<len;i++) {
+        const av = a.t[i] ?? 0;
+        const bv = b.t[i] ?? 0;
+        if (av !== bv) return av - bv;
+      }
+      return 0;
+    }
+
+    // -------------------- Scoring helpers (vs dealer) --------------------
+    // 頭墩：若勝方為一對，該墩得分 = 對子點數（2~14）；否則勝方得 1。
+    function headWinPoints(e2) {
+      if (e2?.cat === 1) {
+        const r = Number(e2.t?.[0] || 0);
+        if (r >= 2 && r <= 14) return r;
+      }
+      return 1;
+    }
+    function headSectionScore(playerE, dealerE) {
+      const cmp = Math.sign(compareEval(playerE, dealerE));
+      if (cmp === 0) return 0;
+      if (cmp > 0) return headWinPoints(playerE);
+      return -headWinPoints(dealerE);
+    }
+
+    // 中墩：同花順 +10；三條 +6；其他勝方得 1。
+    function midWinPoints(e3) {
+      if (e3?.cat === 5) return 10;
+      if (e3?.cat === 4) return 6;
+      return 1;
+    }
+    function midSectionScore(playerE, dealerE) {
+      const cmp = Math.sign(compareEval(playerE, dealerE));
+      if (cmp === 0) return 0;
+      if (cmp > 0) return midWinPoints(playerE);
+      return -midWinPoints(dealerE);
+    }
+
+    // 尾墩：同花順 +5；三條 +3；其他勝方得 1。
+    function tailWinPoints(e3) {
+      if (e3?.cat === 5) return 5;
+      if (e3?.cat === 4) return 3;
+      return 1;
+    }
+    function tailSectionScore(playerE, dealerE) {
+      const cmp = Math.sign(compareEval(playerE, dealerE));
+      if (cmp === 0) return 0;
+      if (cmp > 0) return tailWinPoints(playerE);
+      return -tailWinPoints(dealerE);
+    }
+
+    function strength2(cards) {
+      const e = eval2(cards);
+      const t = e.t;
+      return e.cat*1e9 + (t[0]||0)*1e6 + (t[1]||0)*1e3;
+    }
+
+    function strength3(cards) {
+      const e = eval3(cards);
+      const t = e.t;
+      return e.cat*1e9 + (t[0]||0)*1e6 + (t[1]||0)*1e3 + (t[2]||0);
+    }
+
+    function isAllFilled(arr) {
+      return arr.every(x=>x);
+    }
+
+    function detectFoul(head, mid, tail) {
+      if (!isAllFilled(head) || !isAllFilled(mid) || !isAllFilled(tail)) return {foul:false};
+      const sh = strength2(head);
+      const sm = strength3(mid);
+      const st = strength3(tail);
+      if (sh > sm) return {foul:true, msg:'擺烏龍：頭墩大於中墩'};
+      if (sm > st) return {foul:true, msg:'擺烏龍：中墩大於尾墩'};
+      return {foul:false};
+    }
+
+    function canBeFlush2(cards) {
+      const nonJ = cards.filter(c=>c && c.s!=='J');
+      if (nonJ.length <= 1) return true;
+      return nonJ.every(c=>c.s===nonJ[0].s);
+    }
+    function canBeStraight2(cards) {
+      const nonJ = cards.filter(c=>c && c.s!=='J');
+      const jokers = cards.filter(c=>c && c.s==='J').length;
+      if (jokers >= 1) return true; // one joker can always make an adjacent
+      if (nonJ.length !== 2) return true;
+      const a = nonJ[0].r, b = nonJ[1].r;
+      const hi = Math.max(a,b), lo = Math.min(a,b);
+      if (hi-lo===1) return true;
+      if ((hi===14 && lo===2)) return true;
+      return false;
+    }
+
+    // -------------------- 報到 --------------------
+    function specialLabel(code) {
+      const map = {
+        none: '—',
+        allRed: '全紅 +5（全紅色牌）',
+        allBlack: '全黑 +5（全黑色牌）',
+        threeSnake: '三蛇 +3（三順子）',
+        fourKind: '4條 +10（鐵支）',
+        fourPairs: '4對 +10（四對子）',
+        mixedDragon: '雜龍 +15（牌順序由小至大）',
+        threeStraightFlush: '3同花順 +25（三同花順）',
+        twoFourKind: '2個4條 +30（2對鐵支）',
+        greenDragon: '青龍 +100（一樣顏色牌順序由小至大）',
+        noHand: '百無 +3（3高牌）',
+      };
+      return map[code] || code;
+    }
+
+    function validateSpecial(code, all9Cards, sub, evals) {
+      const c = code || 'none';
+      if (c === 'none') return {ok:true, bonus:0};
+
+      const all = (all9Cards || []).filter(Boolean);
+      const jokers = all.filter(x => x.s === 'J').length;
+      const nonJ = all.filter(x => x.s !== 'J');
+
+      const bonusMap = {
+        allRed: 5,
+        allBlack: 5,
+        threeSnake: 3,
+        fourKind: 10,
+        fourPairs: 10,
+        mixedDragon: 15,
+        threeStraightFlush: 25,
+        twoFourKind: 30,
+        greenDragon: 100,
+        noHand: 3,
+      };
+
+      const isRed = (s) => s === 'H' || s === 'D';
+      const isBlack = (s) => s === 'S' || s === 'C';
+
+      const rankCounts = () => {
+        const m = {};
+        for (const x of nonJ) m[x.r] = (m[x.r]||0) + 1;
+        return m;
+      };
+
+      const canMakeFourKindCount = () => {
+        const counts = rankCounts();
+        const ranks = Object.keys(counts).map(Number);
+        for (const r of ranks) {
+          if ((counts[r]||0) + jokers >= 4) return true;
+        }
+        return jokers >= 4;
+      };
+
+      const canMakeTwoFourKind = () => {
+        const counts = rankCounts();
+        const ranks = Object.keys(counts).map(Number).sort((a,b)=>(counts[b]-counts[a]));
+        let j = jokers;
+        let made = 0;
+        for (const r of ranks) {
+          const need = Math.max(0, 4 - (counts[r]||0));
+          if (need <= j) {
+            j -= need;
+            made += 1;
+            if (made >= 2) return true;
+          }
+        }
+        // could make with only jokers
+        if (made === 1 && j >= 4) return true;
+        if (made === 0 && j >= 8) return true;
+        return false;
+      };
+
+      const canMakeFourPairs = () => {
+        const counts = rankCounts();
+        let pairs = 0;
+        let singles = 0;
+        for (const r in counts) {
+          pairs += Math.floor(counts[r]/2);
+          singles += counts[r] % 2;
+        }
+        // use jokers to pair singles first
+        const useToPairSingles = Math.min(jokers, singles);
+        pairs += useToPairSingles;
+        let jLeft = jokers - useToPairSingles;
+        // remaining jokers can form pairs by themselves
+        pairs += Math.floor(jLeft / 2);
+        return pairs >= 4;
+      };
+
+      const canMakeLength9Straight = (requireSameColor=null) => {
+        // requireSameColor: 'red' | 'black' | null
+        if (requireSameColor) {
+          if (requireSameColor === 'red' && nonJ.some(x => !isRed(x.s))) return false;
+          if (requireSameColor === 'black' && nonJ.some(x => !isBlack(x.s))) return false;
+        }
+
+        const ranks = nonJ.map(x => x.r);
+        const uniq = new Set(ranks);
+        if (uniq.size !== ranks.length) return false; // duplicates can't be fixed
+
+        if (ranks.length === 0) return true; // all jokers
+        const minR = Math.min(...ranks);
+        const maxR = Math.max(...ranks);
+        if (maxR - minR > 8) return false;
+
+        // count missing ranks inside [minR..minR+8]
+        const need = new Set();
+        for (let r=minR; r<=minR+8; r++) need.add(r);
+        for (const r of ranks) need.delete(r);
+        return need.size <= jokers;
+      };
+
+      // 2/3/3 版本的「三蛇 / 三同花順 / 百無」用各墩判斷（頭墩為 2 張用 canBeStraight2/canBeFlush2）
+      const head = sub?.head || [];
+      const mid = sub?.mid || [];
+      const tail = sub?.tail || [];
+      const eHead = evals?.head || eval2(head);
+      const eMid = evals?.mid || eval3(mid);
+      const eTail = evals?.tail || eval3(tail);
+
+      let ok = false;
+      if (c === 'allRed') ok = nonJ.every(x => isRed(x.s));
+      if (c === 'allBlack') ok = nonJ.every(x => isBlack(x.s));
+      if (c === 'threeSnake') ok = canBeStraight2(head) && eMid.cat >= 3 && eTail.cat >= 3; // mid/tail are straight or straight flush
+      if (c === 'threeStraightFlush') ok = canBeStraight2(head) && canBeFlush2(head) && eMid.cat === 5 && eTail.cat === 5;
+      if (c === 'noHand') {
+        // 百無（3高牌）：不允許「刻意拆牌」來達成。
+        // 規則：只看頭/中/尾墩的 8 張牌（不含選莊牌），只要在任何組合下「可以」構成任何牌型（對子/順子/三條/同花順；含鬼牌百搭），就視為報到失敗。
+        // 這裡用更嚴格、與擺牌無關的判斷（以 8 張為準）：
+        // - 有任何鬼牌 -> 一定可組牌型 -> 失敗
+        // - 有任何重複點數 -> 可組對子 -> 失敗
+        // - 任意三個點數可成 3 張順子（含 A23）-> 失敗
+        const eight = [...(head || []), ...(mid || []), ...(tail || [])].filter(Boolean);
+        const anyJoker = eight.some(x => x.s === 'J');
+        if (anyJoker) {
+          ok = false;
+        } else {
+          const nonJ8 = eight.filter(x => x.s !== 'J');
+          const ranks = nonJ8.map(x => x.r);
+          const set = new Set(ranks);
+          if (set.size !== ranks.length) {
+            ok = false;
+          } else {
+            let canStraight = false;
+            for (const r of set) {
+              if (set.has(r + 1) && set.has(r + 2)) { canStraight = true; break; }
+            }
+            if (set.has(14) && set.has(2) && set.has(3)) canStraight = true;
+            ok = !canStraight;
+          }
+        }
+      }
+
+      if (c === 'fourKind') ok = canMakeFourKindCount();
+      if (c === 'twoFourKind') ok = canMakeTwoFourKind();
+      if (c === 'fourPairs') ok = canMakeFourPairs();
+      if (c === 'mixedDragon') ok = canMakeLength9Straight(null);
+      if (c === 'greenDragon') {
+        // same color + length 9 straight
+        ok = canMakeLength9Straight('red') || canMakeLength9Straight('black');
+      }
+
+      return {ok, bonus: ok ? (bonusMap[c] || 0) : 0};
+    }
+
+    // -------------------- PeerJS networking --------------------
+    let peer = null;
+    let isHost = false;
+    let hostId = null;
+    let myId = null;
+
+    // Max players (including host)
+    const MAX_PLAYERS_TOTAL = 6;
+
+    // Host state
+    const hostState = {
+      settings: { roundsTotal: 5 },
+      players: {}, // peerId -> {id,name,conn,joinedAt}
+      round: 0,
+      dealerId: null,
+      dealt: {}, // peerId -> {all9}
+      submissions: {}, // peerId -> {dealerCard, head, mid, tail, report}
+      revealed: false,
+      cumulative: {}, // peerId -> total
+      dealerPick: null, // {controllerId, kind:'BJ'|'SJ', startedAt}
+      dealerOverride: null, // dealerId chosen during dealer pick phase
+    };
+
+    // Client state
+    const clientState = {
+      myName: '玩家',
+      roomId: null,
+      connected: false,
+      joining: false,
+      players: {},
+      settings: { roundsTotal: 5 },
+      round: 0,
+      dealerId: null,
+      cards9: [],
+      dealerCard: null,
+      arranged: { head:[null,null], mid:[null,null,null], tail:[null,null,null] },
+      usedFromHand: new Set(),
+      selectedCardKey: null, // legacy
+      pick: null, // {kind:'hand'|'slot'|'dealer', ...}
+      dealerTargetId: null, // legacy (no longer used)
+      submitted: false,
+      lastReveal: null,
+      cumulative: {},
+      pendingGameOver: null, // set when final round revealed; show after closing reveal modal
+      chatUnread: false,
+    };
+
+    function setRoleBadges() {
+      const role = !peer ? '未連線' : (isHost ? '房主' : '玩家');
+      $('roleBadge').textContent = role;
+      $('gameRoleBadge').textContent = role;
+
+      const hostReady = !!(isHost && peer && myId);
+
+      // Lobby buttons
+      $('btnApplyRounds').classList.toggle('hidden', !hostReady);
+      $('btnStartGame').classList.toggle('hidden', !hostReady);
+      $('btnCreateRoom').classList.toggle('hidden', hostReady);
+      $('btnJoinRoom').classList.toggle('hidden', hostReady);
+
+      // Game controls
+      $('btnReveal').classList.toggle('hidden', !isHost);
+      $('btnNextRound').classList.toggle('hidden', !isHost);
+    }
+
+    function resetAll() {
+      if (peer) {
+        try { peer.destroy(); } catch {}
+      }
+      peer = null;
+      isHost = false;
+      hostId = null;
+      myId = null;
+      if (clientConn) {
+        try { clientConn.close(); } catch {}
+      }
+      clientConn = null;
+      clientState.roomId = null;
+      clientState.connected = false;
+      clientState.players = {};
+      clientState.round = 0;
+      clientState.dealerId = null;
+      clientState.cards9 = [];
+      clientState.dealerCard = null;
+      clientState.arranged = { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      clientState.usedFromHand = new Set();
+      clientState.selectedCardKey = null;
+      clientState.pick = null;
+      clientState.dealerTargetId = null;
+      clientState.submitted = false;
+      clientState.lastReveal = null;
+      clientState.cumulative = {};
+
+      hostState.settings = { roundsTotal: 5 };
+      hostState.players = {};
+      hostState.round = 0;
+      hostState.dealerId = null;
+      hostState.dealt = {};
+      hostState.submissions = {};
+      hostState.revealed = false;
+      hostState.cumulative = {};
+
+      $('myPeerId').textContent = '—';
+      $('btnCopyRoom').classList.add('hidden');
+      $('btnCopyLink').classList.add('hidden');
+      $('btnLeave').classList.add('hidden');
+      $('btnOpenLastReveal').classList.add('hidden');
+      $('scoreBody').innerHTML = '';
+      $('myCumulative').textContent = '0';
+
+      setBadge(false, '離線');
+      setRoleBadges();
+      renderPlayers();
+      renderGameHeader();
+      renderHand();
+      renderSlots();
+      renderReadyList();
+      renderScores(null);
+      closeRevealModal();
+      log('已重置');
+    }
+
+    function ensureName() {
+      const nm = $('inpName').value.trim();
+      clientState.myName = nm || '玩家';
+      localStorage.setItem('ninePokerName', clientState.myName);
+      $('inpName').value = clientState.myName;
+    }
+
+    // Default TURN (for cross-network/NAT)
+    const DEFAULT_NET_CONFIG = {
+      // 內建 TURN（預設不啟用；跨網絡連不上時再開）
+      useTurn: false,
+      turnUrl: 'turn:global.relay.metered.ca:80',
+      turnUser: '68e493ec5be127af015d802b',
+      turnPass: '/hFwmC/JAHDCqiic',
+      relayOnly: false,
+    };
+
+    function loadNetConfig() {
+      try {
+        const raw = localStorage.getItem('ninePokerNetConfig');
+        if (!raw) return { ...DEFAULT_NET_CONFIG };
+        const parsed = JSON.parse(raw) || {};
+        // Allow user to clear by saving empty strings
+        return { ...DEFAULT_NET_CONFIG, ...parsed };
+      } catch {
+        return { ...DEFAULT_NET_CONFIG };
+      }
+    }
+
+    function saveNetConfig(cfg) {
+      localStorage.setItem('ninePokerNetConfig', JSON.stringify(cfg));
+    }
+
+    function applyNetConfigToUI() {
+      const cfg = loadNetConfig();
+      const use = $('chkUseTurn');
+      const u = $('inpTurnUrl');
+      const us = $('inpTurnUser');
+      const pw = $('inpTurnPass');
+      const ro = $('chkRelayOnly');
+      if (use) use.checked = !!cfg.useTurn;
+      if (u) u.value = cfg.turnUrl || '';
+      if (us) us.value = cfg.turnUser || '';
+      if (pw) pw.value = cfg.turnPass || '';
+      if (ro) ro.checked = !!cfg.relayOnly;
+
+      // Lobby quick toggle uses the same checkbox id; keep it in sync
+      try {
+        if ($('chkUseTurn')) $('chkUseTurn').checked = !!cfg.useTurn;
+      } catch {}
+    }
+
+    function buildPeerOptions() {
+      const cfg = loadNetConfig();
+
+      const turnServers = (cfg.useTurn && cfg.turnUrl ? [
+        {
+          urls: String(cfg.turnUrl).trim(),
+          username: String(cfg.turnUser || ''),
+          credential: String(cfg.turnPass || ''),
+        },
+        {
+          urls: String(cfg.turnUrl).trim().includes('transport=')
+            ? String(cfg.turnUrl).trim()
+            : (String(cfg.turnUrl).trim() + '?transport=tcp'),
+          username: String(cfg.turnUser || ''),
+          credential: String(cfg.turnPass || ''),
+        },
+      ] : []);
+
+      const stunServers = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' },
+      ];
+
+      const sanitizeIceServers = (servers) => {
+        const out = [];
+        for (const s of (servers || [])) {
+          if (!s) continue;
+          let urls = s.urls;
+          if (typeof urls === 'string') urls = urls.trim();
+          if (Array.isArray(urls)) urls = urls.map(x => String(x||'').trim()).filter(Boolean);
+          if (typeof urls === 'string' && !urls) continue;
+          if (Array.isArray(urls) && urls.length === 0) continue;
+          const entry = { ...s, urls };
+          out.push(entry);
+        }
+        return out;
+      };
+
+      // Safari/iOS 會因為 iceServers 裡任一條 URL 不被接受而直接丟 "Bad configuration parameters"。
+      // 這裡先清理，再做一次「試建 RTCPeerConnection」的保守降級。
+      let iceServers = sanitizeIceServers([...turnServers, ...stunServers]);
+
+      try {
+        // Probe
+        const pc = new RTCPeerConnection({
+          iceServers,
+          iceTransportPolicy: cfg.relayOnly ? 'relay' : 'all',
+        });
+        pc.close();
+      } catch (e) {
+        // Fallback to minimal set
+        iceServers = sanitizeIceServers([
+          ...turnServers,
+          { urls: 'stun:stun.l.google.com:19302' },
+        ]);
+      }
+
+      const opts = {
+        debug: 1,
+        config: {
+          iceServers,
+          // If TURN not enabled, never force relay (would stall ICE)
+          iceTransportPolicy: (cfg.useTurn && cfg.relayOnly) ? 'relay' : 'all',
+        }
+      };
+
+      return opts;
+    }
+
+    // -------------------- TURN test --------------------
+    function setTurnTestStatus(text, ok=null) {
+      const eln = $('turnTestStatus');
+      if (!eln) return;
+      eln.textContent = text;
+      eln.className = 'text-[11px] ' + (ok === true
+        ? 'text-emerald-200'
+        : (ok === false ? 'text-rose-200' : 'text-emerald-100/70'));
+    }
+
+    async function testTurnServer(cfgOverride=null) {
+      const cfg = cfgOverride || loadNetConfig();
+      const url = String(cfg.turnUrl || '').trim();
+      if (!url) {
+        setTurnTestStatus('TURN 測試：未填 TURN URL', false);
+        toast('請先填入 TURN URL');
+        return;
+      }
+
+      // Some providers require UDP/TCP variants; test both.
+      const urls = [url];
+      if (!url.includes('transport=')) urls.push(url + '?transport=tcp');
+
+      setTurnTestStatus('TURN 測試：進行中…（正在收集 relay candidate）');
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{
+          urls,
+          username: String(cfg.turnUser || ''),
+          credential: String(cfg.turnPass || ''),
+        }],
+        iceTransportPolicy: 'relay',
+      });
+
+      let relayCandidate = null;
+      let gatheredAny = false;
+
+      try {
+        // Create a data channel so ICE gathering starts.
+        pc.createDataChannel('t');
+
+        pc.onicecandidate = (ev) => {
+          if (!ev.candidate) return;
+          gatheredAny = true;
+          const cand = ev.candidate.candidate || '';
+          // Typical candidate line contains: "typ relay"
+          if (cand.includes(' typ relay')) {
+            relayCandidate = cand;
+          }
+        };
+
+        // Kick off ICE.
+        const offer = await pc.createOffer({offerToReceiveAudio:false, offerToReceiveVideo:false});
+        await pc.setLocalDescription(offer);
+
+        const startedAt = Date.now();
+        const timeoutMs = 8000;
+        while (Date.now() - startedAt < timeoutMs) {
+          if (relayCandidate) break;
+          if (pc.iceGatheringState === 'complete') break;
+          await new Promise(r => setTimeout(r, 120));
+        }
+
+        if (relayCandidate) {
+          setTurnTestStatus('TURN 測試：成功（已取得 relay candidate）', true);
+          toast('TURN 可用：已取得 relay candidate');
+          log('TURN test OK: ' + relayCandidate);
+        } else {
+          const state = pc.iceGatheringState;
+          const hint = gatheredAny
+            ? `未取得 relay candidate（iceGatheringState=${state}）。可能帳密/權限不正確或伺服器不允許中繼。`
+            : `未收到任何 candidate（iceGatheringState=${state}）。可能 URL/port 被封鎖或伺服器無回應。`;
+          setTurnTestStatus('TURN 測試：失敗（無 relay candidate）', false);
+          toast('TURN 測試失敗：無 relay candidate');
+          log('TURN test failed: ' + hint);
+        }
+      } catch (e) {
+        const msg = e?.message || String(e);
+        setTurnTestStatus('TURN 測試：錯誤（' + msg + '）', false);
+        toast('TURN 測試錯誤：' + msg);
+        log('TURN test error: ' + msg);
+      } finally {
+        try { pc.close(); } catch {}
+      }
+    }
+
+    function createPeerIfNeeded(customId=null) {
+      if (peer) return;
+      const opts = buildPeerOptions();
+
+      // PeerJS: 必須用 new Peer(customId, opts) 才會指定 id
+      peer = customId ? new Peer(customId, opts) : new Peer(opts);
+
+      peer.on('open', id => {
+        myId = id;
+        $('myPeerId').textContent = id;
+
+        if (isHost) {
+          hostId = id;
+          clientState.roomId = id;
+          setBadge(true, '房間已建立');
+        } else {
+          // client: do not override badge if we are in the middle of joining
+          if (clientState.joining) {
+            setBadge(false, '連線中…');
+          } else {
+            setBadge(true, '已就緒');
+          }
+        }
+
+        $('btnLeave').classList.remove('hidden');
+        $('btnCopyRoom').classList.remove('hidden');
+        $('btnCopyLink').classList.remove('hidden');
+        setRoleBadges();
+        renderPlayers();
+        log(`Peer 已建立：${id}`);
+      });
+
+      peer.on('connection', (conn) => {
+        if (!isHost) {
+          conn.close();
+          return;
+        }
+        wireConn(conn, true);
+      });
+
+      peer.on('disconnected', () => {
+        setBadge(false, '已斷線');
+        log('Peer disconnected');
+      });
+      peer.on('close', () => {
+        setBadge(false, '已關閉');
+        log('Peer closed');
+      });
+      peer.on('error', (err) => {
+        setBadge(false, '錯誤');
+        const t = err?.type || err?.message || String(err);
+        log(`Peer error: ${t}`);
+
+        if (String(err?.type || '').includes('unavailable-id')) {
+          toast('此房間號已被使用，請更換自訂房間號後再建立');
+          setTimeout(() => resetAll(), 50);
+          return;
+        }
+
+        if (String(err?.type || '').includes('network')) {
+          toast('PeerJS 網路異常，請稍後再試或更換網路');
+          return;
+        }
+
+        // Helpful hint for cross-network/NAT issues
+        if (String(err?.type || '').includes('peer-unavailable') || String(err?.type || '').includes('disconnected')) {
+          toast('若在不同網絡仍連不上，請到「進階連線」設定 TURN（中繼）');
+        }
+      });
+    }
+
+    function wireConn(conn, incomingToHost=false) {
+      // WebRTC diagnostics (best-effort). PeerJS internal API: conn.peerConnection may exist.
+      try {
+        const pc = conn.peerConnection;
+        if (pc && !pc.__hke9Bound) {
+          pc.__hke9Bound = true;
+          const tag = incomingToHost ? `pc(host<- ${conn.peer})` : `pc(me-> ${conn.peer})`;
+          pc.addEventListener('iceconnectionstatechange', () => {
+            log(`${tag} iceConnectionState=${pc.iceConnectionState}`);
+          });
+          pc.addEventListener('connectionstatechange', () => {
+            log(`${tag} connectionState=${pc.connectionState}`);
+          });
+          pc.addEventListener('icegatheringstatechange', () => {
+            log(`${tag} iceGatheringState=${pc.iceGatheringState}`);
+          });
+        }
+      } catch {}
+
+      conn.on('open', () => {
+        if (isHost && incomingToHost) {
+          log(`玩家連線進來：${conn.peer}`);
+        }
+        if (!isHost && !incomingToHost) {
+          clientState.connected = true;
+          clientState.joining = false;
+          setBadge(true, '已連線');
+          log(`已連線到房主：${conn.peer}`);
+          send(conn, {t:'join', name: clientState.myName});
+        }
+      });
+
+      conn.on('data', (data) => {
+        try {
+          handleMessage(conn, data);
+        } catch (e) {
+          console.error(e);
+          log('處理訊息失敗：' + (e.message || e));
+        }
+      });
+
+      conn.on('error', (err) => {
+        const type = err?.type || err?.message || String(err);
+        if (isHost) {
+          log(`Conn error from ${conn.peer}: ${type}`);
+        } else {
+          clientState.connected = false;
+          clientState.joining = false;
+          setBadge(false, '連線失敗');
+          log(`連線錯誤：${type}`);
+          toast(type.includes('peer-unavailable')
+            ? '房間不存在或房主尚未上線'
+            : ('連線錯誤：' + type + '（可嘗試：離開/重置後再加入；跨網請測試/設定 TURN）'));
+        }
+      });
+
+      conn.on('close', () => {
+        if (isHost) {
+          const pid = conn.peer;
+          if (hostState.players[pid]) {
+            log(`玩家離線：${hostState.players[pid].name} (${pid})`);
+            delete hostState.players[pid];
+            delete hostState.dealt[pid];
+            delete hostState.submissions[pid];
+            broadcastPlayers();
+            renderPlayers();
+            renderReadyList();
+          }
+        } else {
+          const wasJoining = clientState.joining;
+          clientState.connected = false;
+          clientState.joining = false;
+          setBadge(false, '已斷線');
+          log('與房主連線已關閉');
+          if (wasJoining) {
+            toast('連線被關閉：可能房主不在線/房號錯誤，或 ICE 無法打通（跨網/NAT 請測試 TURN）');
+          }
+        }
+      });
+    }
+
+    function send(conn, obj) {
+      conn.send({ ...obj, _ts: Date.now() });
+    }
+
+    function broadcast(obj) {
+      for (const pid in hostState.players) {
+        try { hostState.players[pid].conn.send({ ...obj, _ts: Date.now() }); } catch {}
+      }
+    }
+
+    function broadcastPlayers() {
+      const list = Object.values(hostState.players).map(p => ({id:p.id, name:p.name}));
+      broadcast({t:'players', list, hostId});
+    }
+
+    function handleMessage(conn, msg) {
+      if (!msg || typeof msg !== 'object') return;
+      if (isHost) {
+        handleAsHost(conn, msg);
+      } else {
+        handleAsClient(conn, msg);
+      }
+    }
+
+    function handleAsHost(conn, msg) {
+      if (msg.t === 'join') {
+        const pid = conn.peer;
+
+        // room full check (host + players <= MAX_PLAYERS_TOTAL)
+        const currentTotal = 1 + Object.keys(hostState.players).length;
+        if (currentTotal >= MAX_PLAYERS_TOTAL) {
+          try { send(conn, {t:'error', message:`房間已滿（最多 ${MAX_PLAYERS_TOTAL} 人）`}); } catch {}
+          try { conn.close(); } catch {}
+          log(`拒絕加入（房間已滿）：${pid}`);
+          return;
+        }
+
+        const name = String(msg.name || '玩家').slice(0,20);
+        hostState.players[pid] = { id: pid, name, conn, joinedAt: Date.now() };
+        renderPlayers();
+        send(conn, {t:'welcome', hostId, settings: hostState.settings, me: {id: pid}, cumulative: hostState.cumulative});
+        broadcastPlayers();
+        broadcast({t:'settings', settings: hostState.settings});
+        log(`玩家加入：${name} (${pid})`);
+        return;
+      }
+
+      if (msg.t === 'submit') {
+        const pid = conn.peer;
+        if (!hostState.dealt[pid]) return;
+
+        const sub = {
+          dealerCard: msg.dealerCard,
+          head: msg.head,
+          mid: msg.mid,
+          tail: msg.tail,
+          report: msg.report || 'none',
+        };
+
+        const ok = validateSubmissionAgainstDeal(pid, sub);
+        if (!ok.ok) {
+          send(conn, {t:'error', message: ok.msg});
+          log(`拒絕提交（${hostState.players[pid]?.name || pid}）：${ok.msg}`);
+          return;
+        }
+
+        hostState.submissions[pid] = sub;
+        log(`收到提交：${hostState.players[pid]?.name || pid}`);
+        broadcast({t:'ready', ready: readyMapForBroadcast()});
+        renderReadyList();
+        updateMidActionButton();
+
+        if (allSubmitted()) {
+          // If any dealerCard is Joker, start pre-reveal dealer-pick flow.
+          const controller = findDealerPickController(hostState.submissions);
+          if (controller) {
+            hostState.dealerPick = { ...controller, round: hostState.round, startedAt: Date.now() };
+            hostState.dealerOverride = null;
+            const ctx = {
+              t: 'dealerPickStart',
+              round: hostState.round,
+              controllerId: controller.controllerId,
+              kind: controller.kind,
+              submissions: sanitizeSubsForBroadcast(),
+              players: allPlayersForBroadcast(),
+            };
+            // Send only to controller (it might be host)
+            if (controller.controllerId === hostId) {
+              openDealerPickPreModal({
+                round: ctx.round,
+                kind: ctx.kind,
+                controllerId: ctx.controllerId,
+                submissions: ctx.submissions,
+                players: ctx.players,
+                currentDealerId: hostId,
+              });
+              toast('你持有鬼牌：請在結算前指定莊家');
+            } else {
+              const p = hostState.players[controller.controllerId];
+              if (p?.conn) send(p.conn, ctx);
+              toast('等待鬼牌玩家指定莊家…');
+              log(`等待 ${hostState.players[controller.controllerId]?.name || controller.controllerId} 指定莊家`);
+            }
+            return;
+          }
+
+          // No dealer-pick needed, reveal immediately.
+          revealRound();
+        }
+        return;
+      }
+
+      if (msg.t === 'dealerPickChoice') {
+        // controller sends {round, kind, dealerId}
+        const pick = msg.pick || {};
+        const expected = hostState.dealerPick;
+        if (!expected) {
+          send(conn, {t:'error', message:'目前沒有需要指定莊家的局'});
+          return;
+        }
+        if (pick.round !== expected.round) {
+          send(conn, {t:'error', message:'指定莊家局數不符'});
+          return;
+        }
+        if (conn.peer !== expected.controllerId) {
+          send(conn, {t:'error', message:'你不是本局指定莊家的控制者'});
+          return;
+        }
+
+        const dealerId = String(pick.dealerId || '');
+        const ids = [hostId, ...Object.keys(hostState.players)];
+        if (!ids.includes(dealerId)) {
+          send(conn, {t:'error', message:'指定的莊家不在房間內'});
+          return;
+        }
+
+        hostState.dealerOverride = dealerId;
+        hostState.dealerPick = null;
+        broadcast({t:'dealerPickFinal', round: pick.round, dealerId});
+        toast('已收到莊家指定，開始結算');
+        revealRound();
+        return;
+      }
+
+      if (msg.t === 'restartRequest') {
+        // only host can restart; this is a hint from players
+        const from = hostState.players[conn.peer]?.name || conn.peer;
+        log(`收到再來一局請求：${from}`);
+        toast(`收到 ${from} 的再來一局請求`);
+        return;
+      }
+
+      if (msg.t === 'chat') {
+        const fromId = conn.peer;
+        const fromName = hostState.players[fromId]?.name || fromId;
+        const text = String(msg.text||'').slice(0,200);
+        // broadcast to all (including sender)
+        broadcast({t:'chat', from: fromName, fromId, text});
+        // also show on host screen (mark as chat)
+        glog(`${fromName}：${text}`, {chat:true});
+        return;
+      }
+
+      if (msg.t === 'danmaku') {
+        const fromId = conn.peer;
+        const fromName = hostState.players[fromId]?.name || fromId;
+        const text = String(msg.text||'').slice(0,200);
+        // broadcast to all (including sender)
+        broadcast({t:'danmaku', from: fromName, fromId, text});
+        // show on host immediately
+        spawnDanmaku(text, fromName);
+        return;
+      }
+
+      if (msg.t === 'poop') {
+        const fromId = conn.peer;
+        const fromName = hostState.players[fromId]?.name || fromId;
+        const targetId = String(msg.targetId || '');
+        if (!targetId) return;
+        // broadcast to all (including sender)
+        broadcast({t:'poop', from: fromName, fromId, targetId});
+        // show on host immediately (throw)
+        spawnPoopThrow(fromId, targetId);
+        return;
+      }
+    }
+
+    function handleAsClient(conn, msg) {
+      if (msg.t === 'welcome') {
+        hostId = msg.hostId;
+        clientState.settings = msg.settings || clientState.settings;
+        clientState.cumulative = msg.cumulative || clientState.cumulative || {};
+        $('inpRounds').value = clientState.settings.roundsTotal;
+        setRoleBadges();
+        renderPlayers();
+        updateMyCumulative();
+        log(`加入成功。房主：${hostId}`);
+        return;
+      }
+
+      if (msg.t === 'players') {
+        clientState.players = {};
+        for (const p of (msg.list||[])) clientState.players[p.id] = p;
+        hostId = msg.hostId || hostId;
+        renderPlayers();
+        return;
+      }
+
+      if (msg.t === 'settings') {
+        clientState.settings = msg.settings || clientState.settings;
+        $('inpRounds').value = clientState.settings.roundsTotal;
+        log(`設定更新：局數 ${clientState.settings.roundsTotal}`);
+        return;
+      }
+
+      if (msg.t === 'start') {
+        showPage('game');
+        $('btnGoLobby').classList.remove('hidden');
+        clientState.round = msg.round;
+        clientState.settings = msg.settings || clientState.settings;
+        clientState.cumulative = msg.cumulative || clientState.cumulative || {};
+        $('gameRoomId').textContent = clientState.roomId || '—';
+        $('gameRoundInfo').textContent = `${clientState.round} / ${clientState.settings.roundsTotal}`;
+        glog(`遊戲開始（共 ${clientState.settings.roundsTotal} 局）`);
+        updateMyCumulative();
+        try { renderTableSeats(); } catch {}
+        return;
+      }
+
+      if (msg.t === 'deal') {
+        clientState.round = msg.round;
+        updateMidActionButton();
+        clientState.dealerId = null;
+        clientState.cards9 = msg.cards9 || [];
+        clientState.dealerCard = null;
+        clientState.arranged = { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+        clientState.usedFromHand = new Set();
+        clientState.selectedCardKey = null;
+        clientState.pick = null;
+        clientState.dealerTargetId = null;
+        clientState.submitted = false;
+        try { $('selReport').value = 'none'; } catch {}
+        $('submitStatus').textContent = '尚未提交';
+        $('submitStatus').className = 'text-xs text-emerald-50/80';
+        $('scoreBody').innerHTML = '';
+        $('btnOpenLastReveal').classList.add('hidden');
+
+        renderGameHeader();
+        renderHand();
+        renderSlots();
+        renderReadyList(msg.ready || null);
+        try { renderTableSeats(); } catch {}
+        glog(`第 ${clientState.round} 局：收到發牌（請先選莊牌）`);
+        return;
+      }
+
+      if (msg.t === 'ready') {
+        renderReadyList(msg.ready);
+        return;
+      }
+
+      if (msg.t === 'dealerPickStart') {
+        // Only controller should see the pre-reveal dealer pick modal
+        const controllerId = String(msg.controllerId || '');
+        if (controllerId !== myId) {
+          glog('等待鬼牌玩家指定莊家…');
+          return;
+        }
+        openDealerPickPreModal({
+          round: msg.round,
+          kind: msg.kind,
+          controllerId,
+          submissions: msg.submissions || {},
+          players: msg.players || [],
+          currentDealerId: myId,
+        });
+        glog('你持有鬼牌：請在結算前指定莊家');
+        return;
+      }
+
+      if (msg.t === 'dealerPickFinal') {
+        // informational
+        glog('莊家已指定：' + getNameById(msg.dealerId));
+        return;
+      }
+
+      if (msg.t === 'reveal') {
+        clientState.lastReveal = msg;
+        updateMidActionButton();
+        clientState.dealerId = msg.dealerId;
+        clientState.cumulative = msg.cumulative || clientState.cumulative || {};
+        renderGameHeader();
+        renderScores(msg);
+        updateMyCumulative();
+        try { renderTableSeats(); playRevealOnTable(msg); } catch {}
+
+        // Do NOT auto-open detailed reveal modal; show it only when user taps "本局結算"
+        $('btnOpenLastReveal').classList.remove('hidden');
+
+        // If this is the final round, delay gameOver modal until user checks/finishes this round
+        const roundsTotal = clientState.settings.roundsTotal;
+        if (Number(msg.round) >= Number(roundsTotal)) {
+          clientState.pendingGameOver = {
+            roomId: clientState.roomId,
+            players: msg.players || [],
+            cumulative: clientState.cumulative,
+          };
+          // Auto-open final summary after a short delay (unless user opens the round detail modal)
+          setTimeout(() => {
+            if (!clientState.pendingGameOver) return;
+            const revealOpen = !$('revealModal').classList.contains('hidden');
+            const overOpen = !$('gameOverModal').classList.contains('hidden');
+            if (revealOpen || overOpen) return;
+            const payload = clientState.pendingGameOver;
+            clientState.pendingGameOver = null;
+            openGameOverModal(payload);
+          }, 1600);
+        }
+        return;
+      }
+
+      if (msg.t === 'nextRound') {
+        clientState.lastReveal = null;
+        updateMidActionButton();
+        clientState.dealerId = null;
+        $('scoreBody').innerHTML = '';
+        renderGameHeader();
+        $('btnOpenLastReveal').classList.add('hidden');
+        glog('準備下一局…');
+        return;
+      }
+
+      if (msg.t === 'gameOver') {
+        // show summary modal (delay if reveal/status modal is open)
+        clientState.cumulative = msg.cumulative || clientState.cumulative || {};
+        const payload = {
+          roomId: clientState.roomId,
+          players: msg.players || [],
+          cumulative: clientState.cumulative,
+        };
+
+        const revealOpen = !$('revealModal').classList.contains('hidden');
+        if (revealOpen) {
+          clientState.pendingGameOver = payload;
+          glog('遊戲已完結（關閉本局結算後顯示總結）');
+        } else {
+          openGameOverModal(payload);
+          glog('遊戲已完結');
+        }
+        return;
+      }
+
+      if (msg.t === 'restart') {
+        // reset per-game states, keep connection
+        clientState.lastReveal = null;
+        clientState.dealerId = null;
+        clientState.round = 0;
+        clientState.cumulative = msg.cumulative || {};
+        $('scoreBody').innerHTML = '';
+        $('btnOpenLastReveal').classList.add('hidden');
+        closeRevealModal();
+        closeGameOverModal();
+        renderGameHeader();
+        updateMyCumulative();
+        glog('房主已重開新一局（從第 1 局開始）');
+        return;
+      }
+
+      if (msg.t === 'chat') {
+        // de-dup: if this is my own message echoed back, skip (already appended locally)
+        if (msg.fromId && msg.fromId === myId) return;
+        glog(`${msg.from}：${msg.text}`, {chat:true});
+        return;
+      }
+
+      if (msg.t === 'danmaku') {
+        // de-dup: if this is my own danmaku echoed back, skip (already shown locally)
+        if (msg.fromId && msg.fromId === myId) return;
+        spawnDanmaku(String(msg.text||''), String(msg.from||''));
+        return;
+      }
+
+      if (msg.t === 'poop') {
+        // de-dup: if this is my own poop echoed back, skip (already shown locally)
+        if (msg.fromId && msg.fromId === myId) return;
+        spawnPoopThrow(String(msg.fromId||''), String(msg.targetId||''));
+        return;
+      }
+
+      if (msg.t === 'error') {
+        const m = msg.message || '發生錯誤';
+        toast(m);
+        // If join-related error, stop joining state so UI won't stay "連線中"
+        if (clientState.joining) {
+          clientState.joining = false;
+          if (!clientState.connected) setBadge(false, '錯誤');
+        }
+      }
+    }
+
+    function readyMapForBroadcast() {
+      const out = {};
+      out[hostId] = !!hostState.submissions[hostId];
+      for (const pid in hostState.players) out[pid] = !!hostState.submissions[pid];
+      return out;
+    }
+
+    function allSubmitted() {
+      const ids = [hostId, ...Object.keys(hostState.players)];
+      return ids.every(id => !!hostState.submissions[id]);
+    }
+
+    // -------------------- Host validation & game logic --------------------
+    function normalizeCard(c) {
+      if (!c || typeof c !== 'object') return null;
+      if (c.s === 'J') {
+        if (c.j !== 'BJ' && c.j !== 'SJ') return null;
+        return {s:'J', j:c.j, r: c.j==='BJ'?16:15};
+      }
+      if (!SUITS.includes(c.s)) return null;
+      const r = Number(c.r);
+      if (!Number.isInteger(r) || r < 2 || r > 14) return null;
+      return {r, s:c.s};
+    }
+
+    function validateSubmissionAgainstDeal(pid, sub) {
+      const dealt = hostState.dealt[pid]?.all9;
+      if (!dealt || dealt.length !== 9) return {ok:false, msg:'尚未發牌'};
+      const dealtKeys = new Set(dealt.map(cardKey));
+
+      const dealerCard = normalizeCard(sub.dealerCard);
+      const head = (sub.head||[]).map(normalizeCard);
+      const mid = (sub.mid||[]).map(normalizeCard);
+      const tail = (sub.tail||[]).map(normalizeCard);
+
+      if (!dealerCard) return {ok:false, msg:'請選擇選莊牌'};
+      if (head.length !== 2 || mid.length !== 3 || tail.length !== 3) return {ok:false, msg:'頭/中/尾墩張數必須為：2 / 3 / 3'};
+      if (head.some(x=>!x) || mid.some(x=>!x) || tail.some(x=>!x)) return {ok:false, msg:'牌資料不完整'};
+
+      const used = [dealerCard, ...head, ...mid, ...tail].map(cardKey);
+      const uniq = new Set(used);
+      if (uniq.size !== 9) return {ok:false, msg:'牌重複（選莊/墩牌不可重複）'};
+      for (const k of uniq) {
+        if (!dealtKeys.has(k)) return {ok:false, msg:'提交的牌不在你的手牌中'};
+      }
+
+      // 允許「擺烏龍」提交（結算時會依規則處理）
+
+      return {ok:true};
+    }
+
+    function hostApplyRounds() {
+      let v = Number($('inpRounds').value);
+      if (!Number.isFinite(v) || v < 5) v = 5;
+      v = Math.round(v/5)*5;
+      if (v < 5) v = 5;
+      $('inpRounds').value = v;
+      hostState.settings.roundsTotal = v;
+      broadcast({t:'settings', settings: hostState.settings});
+      log(`房主設定局數：${v}`);
+    }
+
+    function startGame() {
+      if (!isHost) return;
+      if (!peer || !myId) return;
+      if (Object.keys(hostState.players).length < 1) {
+        toast('至少需要 2 人（含房主）才能開始');
+        return;
+      }
+      hostState.round = 0;
+      hostState.cumulative = {};
+      clientState.cumulative = {};
+      broadcast({t:'start', round: 1, settings: hostState.settings, cumulative: hostState.cumulative});
+      showPage('game');
+      $('gameRoomId').textContent = myId;
+      renderGameHeader();
+      log(`房主開始遊戲：共 ${hostState.settings.roundsTotal} 局`);
+      updateMyCumulative();
+      nextRound();
+    }
+
+    function nextRound() {
+      if (!isHost) return;
+      hostState.round += 1;
+      hostState.revealed = false;
+      updateMidActionButton();
+      hostState.dealt = {};
+      hostState.submissions = {};
+      hostState.dealerId = null;
+      hostState.dealerPick = null;
+      hostState.dealerOverride = null;
+
+      if (hostState.round > hostState.settings.roundsTotal) {
+        broadcast({t:'error', message:'遊戲已結束'});
+        glog('遊戲已結束');
+        toast('遊戲已結束');
+        return;
+      }
+
+      broadcast({t:'nextRound', round: hostState.round});
+      // clear last reveal (host local)
+      clientState.lastReveal = null;
+      glog(`第 ${hostState.round} 局：發牌中…`);
+
+      const ids = [hostId, ...Object.keys(hostState.players)];
+      const deck = shuffle(makeDeck54());
+      const need = ids.length * 9;
+      if (deck.length < need) {
+        toast('人數過多，牌不夠（此原型為單副 54 張）');
+        return;
+      }
+
+      let idx = 0;
+      for (const id of ids) {
+        const all9 = deck.slice(idx, idx+9);
+        idx += 9;
+        hostState.dealt[id] = { all9 };
+      }
+
+      const ready = readyMapForBroadcast();
+      for (const pid in hostState.players) {
+        const p = hostState.players[pid];
+        send(p.conn, {
+          t:'deal',
+          round: hostState.round,
+          cards9: hostState.dealt[pid].all9,
+          ready,
+        });
+      }
+
+      // host as client
+      clientState.round = hostState.round;
+      clientState.dealerId = null;
+      clientState.cards9 = hostState.dealt[hostId].all9;
+      clientState.dealerCard = null;
+      clientState.arranged = { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      clientState.usedFromHand = new Set();
+      clientState.selectedCardKey = null;
+      clientState.pick = null;
+      clientState.dealerTargetId = null;
+      clientState.pendingGameOver = null;
+      clientState.submitted = false;
+      try { $('selReport').value = 'none'; } catch {}
+      $('submitStatus').textContent = '尚未提交';
+      $('submitStatus').className = 'text-xs text-emerald-50/80';
+      $('scoreBody').innerHTML = '';
+      $('btnOpenLastReveal').classList.add('hidden');
+
+      renderPlayers();
+      renderGameHeader();
+      renderHand();
+      renderSlots();
+      renderReadyList(ready);
+      updateMyCumulative();
+    }
+
+    function computeDealerIdFromSubmissions() {
+      // Default: compare dealerCard as usual (ghost / selection override is handled by hostState.dealerOverride)
+      const ids = [hostId, ...Object.keys(hostState.players)];
+      let bestId = null;
+      for (const id of ids) {
+        const sub = hostState.submissions[id];
+        if (!sub || !sub.dealerCard) continue;
+        if (!bestId) { bestId = id; continue; }
+        const cmp = compareSelectCard(sub.dealerCard, hostState.submissions[bestId].dealerCard);
+        if (cmp > 0) bestId = id;
+        if (cmp === 0) {
+          // deterministic tie-break
+          if (String(id) > String(bestId)) bestId = id;
+        }
+      }
+      return bestId;
+    }
+
+    function revealRound() {
+      if (!isHost) return;
+      if (hostState.revealed) return;
+
+      const ids = [hostId, ...Object.keys(hostState.players)];
+      const missing = ids.filter(id => !hostState.submissions[id]);
+      if (missing.length) {
+        toast('尚有玩家未提交，無法結算');
+        return;
+      }
+      const noDealerPick = ids.filter(id => !hostState.submissions[id]?.dealerCard);
+      if (noDealerPick.length) {
+        toast('有人未選莊牌，無法結算');
+        return;
+      }
+
+      // Precompute eval + report validation for every player
+      const evalMap = {};
+      const reportMap = {};
+      const foulMap = {}; // id -> {foul,msg}
+
+      for (const id of ids) {
+        const sub = hostState.submissions[id];
+        const se = { head: eval2(sub.head), mid: eval3(sub.mid), tail: eval3(sub.tail) };
+        evalMap[id] = se;
+
+        const all9 = [sub.dealerCard, ...sub.head, ...sub.mid, ...sub.tail];
+        const sp = validateSpecial(sub.report, all9, sub, se);
+        reportMap[id] = sp;
+
+        foulMap[id] = detectFoul(sub.head, sub.mid, sub.tail);
+      }
+
+      // 報到失敗 => 視為擺烏龍
+      const wulongSet = new Set();
+      for (const id of ids) {
+        const sub = hostState.submissions[id];
+        const reportCode = sub.report || 'none';
+        const sp = reportMap[id] || {ok:true, bonus:0};
+
+        if (foulMap[id]?.foul) wulongSet.add(id);
+        if (reportCode !== 'none' && !(sp.ok && sp.bonus > 0)) {
+          wulongSet.add(id);
+        }
+      }
+
+      // 決定莊家：
+      // - 若有人擺烏龍：擺烏龍者自動當莊（多名則用選莊牌最大者；再以 id tie-break）
+      // - 否則：照常用結算前指定或比選莊牌
+      let dealerId = null;
+      if (wulongSet.size > 0) {
+        const cands = [...wulongSet];
+        cands.sort((a,b) => {
+          const ca = hostState.submissions[a]?.dealerCard;
+          const cb = hostState.submissions[b]?.dealerCard;
+          const cmp = compareSelectCard(ca, cb);
+          if (cmp !== 0) return -cmp; // larger first
+          return String(a) < String(b) ? -1 : 1;
+        });
+        dealerId = cands[0];
+      } else {
+        dealerId = hostState.dealerOverride || computeDealerIdFromSubmissions();
+      }
+
+      hostState.dealerOverride = null;
+      if (!dealerId) {
+        toast('無法決定莊家（資料不足）');
+        return;
+      }
+      hostState.dealerId = dealerId;
+
+      const dealerSub = hostState.submissions[dealerId];
+      const dealerEval = evalMap[dealerId];
+
+      // 閒家報到成功優先於莊家報到成功
+      let hasNonDealerReportOk = false;
+      for (const id of ids) {
+        if (id === dealerId) continue;
+        const sub = hostState.submissions[id];
+        const reportCode = sub.report || 'none';
+        const sp = reportMap[id] || {ok:true, bonus:0};
+        if (reportCode !== 'none' && sp.ok && sp.bonus > 0) {
+          hasNonDealerReportOk = true;
+          break;
+        }
+      }
+
+      const dealerReportCode = dealerSub?.report || 'none';
+      const dealerReport = reportMap[dealerId] || {ok:false, bonus:0};
+      const dealerReportOk = dealerReportCode !== 'none' && dealerReport.ok && dealerReport.bonus > 0;
+
+      // 特殊分支：莊家報到有效且沒有任何閒家報到有效時才套用「莊家報到」
+      if (dealerReportOk && !hasNonDealerReportOk) {
+        const bonus = dealerReport.bonus;
+        const results = {};
+
+        for (const id of ids) {
+          const sub = hostState.submissions[id];
+          const se = evalMap[id];
+          const isDealer = id === dealerId;
+
+          results[id] = {
+            total: isDealer ? (bonus * (ids.length - 1)) : -bonus,
+            note: isDealer ? `莊家報到+${bonus}×${ids.length - 1}（本局只計報到）` : `被莊家報到-${bonus}`,
+            per: {head:0, mid:0, tail:0},
+            report: sub.report || 'none',
+            evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
+            dealerCard: sub.dealerCard,
+          };
+        }
+
+        for (const id of ids) {
+          hostState.cumulative[id] = Number(hostState.cumulative[id] || 0) + Number(results[id]?.total || 0);
+        }
+
+        const payload = {
+          t:'reveal',
+          round: hostState.round,
+          dealerId,
+          results,
+          submissions: sanitizeSubsForBroadcast(),
+          players: allPlayersForBroadcast(),
+          cumulative: hostState.cumulative,
+        };
+
+        hostState.revealed = true;
+        broadcast(payload);
+
+        clientState.lastReveal = payload;
+        clientState.dealerId = dealerId;
+        clientState.cumulative = hostState.cumulative;
+        renderGameHeader();
+        renderScores(payload);
+        updateMyCumulative();
+        try { renderTableSeats(); playRevealOnTable(payload); } catch {}
+        $('btnOpenLastReveal').classList.remove('hidden');
+        updateMidActionButton();
+        glog('房主已結算本局');
+
+        if (hostState.round >= hostState.settings.roundsTotal) {
+          const overPayload = {
+            t:'gameOver',
+            roomId: myId,
+            players: allPlayersForBroadcast(),
+            cumulative: hostState.cumulative,
+          };
+          broadcast(overPayload);
+          clientState.pendingGameOver = {
+            roomId: myId,
+            players: overPayload.players,
+            cumulative: overPayload.cumulative,
+          };
+          glog('所有局數完成（關閉本局結算後顯示總結）');
+        }
+        return;
+      }
+
+      const results = {};
+      let dealerNet = 0;
+
+      for (const id of ids) {
+        const sub = hostState.submissions[id];
+        const se = evalMap[id];
+        const reportCode = sub.report || 'none';
+        const sp = reportMap[id] || {ok:true, bonus:0};
+
+        const wulongDealer = wulongSet.has(dealerId);
+
+        // 擺烏龍局：擺烏龍者自動當莊，且「擺烏龍莊」本局三墩全輸。
+        // - 其他擺烏龍玩家：對莊家三墩全輸（固定 -3）
+        // - 非擺烏龍且未報到成功玩家：自動三墩全勝（依各墩贏分計算）
+        if (wulongDealer && id !== dealerId) {
+          if (wulongSet.has(id)) {
+            // 強制三墩全輸：分數按「莊家該墩牌型」的正常分值計算
+            const per = {
+              head: -headWinPoints(dealerEval.head),
+              mid: -midWinPoints(dealerEval.mid),
+              tail: -tailWinPoints(dealerEval.tail),
+            };
+            const total = per.head + per.mid + per.tail;
+
+            const note = (reportCode !== 'none' && !(sp.ok && sp.bonus > 0))
+              ? '報到不符→擺烏龍（本局三墩全輸）'
+              : '擺烏龍（本局三墩全輸）';
+
+            results[id] = {
+              total,
+              note,
+              per,
+              report: reportCode,
+              evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
+              dealerCard: sub.dealerCard,
+            };
+            dealerNet -= total;
+            continue;
+          }
+
+          // 報到成功仍優先（不比三墩）
+          if (reportCode !== 'none' && sp.ok && sp.bonus > 0) {
+            const total = sp.bonus;
+            results[id] = {
+              total,
+              note: `報到+${sp.bonus}（本局只計報到）`,
+              per: {head:0, mid:0, tail:0},
+              report: reportCode,
+              evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
+              dealerCard: sub.dealerCard,
+            };
+            dealerNet -= total;
+            continue;
+          }
+
+          // 自動三墩全勝（依各墩贏分）
+          const per = {
+            head: headWinPoints(se.head),
+            mid: midWinPoints(se.mid),
+            tail: tailWinPoints(se.tail),
+          };
+          const total = per.head + per.mid + per.tail;
+          results[id] = {
+            total,
+            note: '擺烏龍莊：你三墩全勝',
+            per,
+            report: reportCode,
+            evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
+            dealerCard: sub.dealerCard,
+          };
+          dealerNet -= total;
+          continue;
+        }
+
+        // 報到有效（閒家）：不與莊對比頭中尾，直接得分＝報到分數（本局只計報到）
+        if (id !== dealerId && reportCode !== 'none' && sp.ok && sp.bonus > 0) {
+          const total = sp.bonus;
+          results[id] = {
+            total,
+            note: `報到+${sp.bonus}（本局只計報到）`,
+            per: {head:0, mid:0, tail:0},
+            report: reportCode,
+            evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
+            dealerCard: sub.dealerCard,
+          };
+          dealerNet -= total;
+          continue;
+        }
+
+        // Normal compare vs dealer
+        const per = {head:0,mid:0,tail:0};
+        let total = 0;
+        let noteParts = [];
+
+        if (id !== dealerId) {
+          per.head = headSectionScore(se.head, dealerEval.head);
+          per.mid  = midSectionScore(se.mid, dealerEval.mid);
+          per.tail = tailSectionScore(se.tail, dealerEval.tail);
+          total = per.head + per.mid + per.tail;
+
+          if (Math.abs(per.head) !== 0 && (se.head.cat === 1 || dealerEval.head.cat === 1)) {
+            if (per.head > 0 && se.head.cat === 1) noteParts.push(`頭墩對子+${headWinPoints(se.head)}`);
+            if (per.head < 0 && dealerEval.head.cat === 1) noteParts.push(`頭墩對子-${headWinPoints(dealerEval.head)}`);
+          }
+          if (Math.abs(per.mid) !== 0 && (se.mid.cat === 5 || se.mid.cat === 4 || dealerEval.mid.cat === 5 || dealerEval.mid.cat === 4)) {
+            if (per.mid > 0) {
+              if (se.mid.cat === 5) noteParts.push('中墩同花順+10');
+              else if (se.mid.cat === 4) noteParts.push('中墩三條+6');
+            } else {
+              if (dealerEval.mid.cat === 5) noteParts.push('中墩同花順-10');
+              else if (dealerEval.mid.cat === 4) noteParts.push('中墩三條-6');
+            }
+          }
+          if (Math.abs(per.tail) !== 0 && (se.tail.cat === 5 || se.tail.cat === 4 || dealerEval.tail.cat === 5 || dealerEval.tail.cat === 4)) {
+            if (per.tail > 0) {
+              if (se.tail.cat === 5) noteParts.push('尾墩同花順+5');
+              else if (se.tail.cat === 4) noteParts.push('尾墩三條+3');
+            } else {
+              if (dealerEval.tail.cat === 5) noteParts.push('尾墩同花順-5');
+              else if (dealerEval.tail.cat === 4) noteParts.push('尾墩三條-3');
+            }
+          }
+        }
+
+        let note = noteParts.join('｜');
+
+        // 報到不符：視作擺烏龍（但若玩家就是莊家，僅標註）
+        if (reportCode !== 'none' && !(sp.ok && sp.bonus > 0)) {
+          note += (note?'｜':'') + (id === dealerId ? '報到不符' : '報到不符→擺烏龍');
+        }
+
+        // 莊家報到被閒家優先：只做標註
+        if (id === dealerId && dealerReportOk && hasNonDealerReportOk) {
+          note += (note?'｜':'') + '莊報到被閒家優先';
+        }
+
+        if (id !== dealerId) dealerNet -= total;
+
+        results[id] = {
+          total,
+          note,
+          per,
+          report: reportCode,
+          evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
+          dealerCard: sub.dealerCard,
+        };
+      }
+
+      // Dealer net
+      if (dealerId && results[dealerId]) {
+        const wulongDealer = wulongSet.has(dealerId);
+        results[dealerId].total = dealerNet;
+        const extra = (wulongDealer ? '擺烏龍莊（全輸）' : '莊家淨值');
+        results[dealerId].note = (results[dealerId].note ? results[dealerId].note + '｜' : '') + extra;
+      }
+
+      for (const id of ids) {
+        hostState.cumulative[id] = Number(hostState.cumulative[id] || 0) + Number(results[id]?.total || 0);
+      }
+
+      const payload = {
+        t:'reveal',
+        round: hostState.round,
+        dealerId,
+        results,
+        submissions: sanitizeSubsForBroadcast(),
+        players: allPlayersForBroadcast(),
+        cumulative: hostState.cumulative,
+      };
+
+      hostState.revealed = true;
+      broadcast(payload);
+
+      clientState.lastReveal = payload;
+      clientState.dealerId = dealerId;
+      clientState.cumulative = hostState.cumulative;
+      renderGameHeader();
+      renderScores(payload);
+      updateMyCumulative();
+      try { renderTableSeats(); playRevealOnTable(payload); } catch {}
+
+      // Do NOT auto-open detailed reveal modal; show it only when user taps "本局結算"
+      $('btnOpenLastReveal').classList.remove('hidden');
+      updateMidActionButton();
+
+      if (hostState.round >= hostState.settings.roundsTotal) {
+        const overPayload = {
+          t:'gameOver',
+          roomId: myId,
+          players: allPlayersForBroadcast(),
+          cumulative: hostState.cumulative,
+        };
+        broadcast(overPayload);
+        clientState.pendingGameOver = {
+          roomId: myId,
+          players: overPayload.players,
+          cumulative: overPayload.cumulative,
+        };
+        glog('所有局數完成（關閉本局結算後顯示總結）');
+      }
+    }
+
+    function allPlayersForBroadcast() {
+      const list = [{id: hostId, name: clientState.myName || '房主'}];
+      for (const pid in hostState.players) list.push({id: pid, name: hostState.players[pid].name});
+      return list;
+    }
+
+    function sanitizeSubsForBroadcast() {
+      const out = {};
+      out[hostId] = hostState.submissions[hostId] || null;
+      for (const pid in hostState.players) out[pid] = hostState.submissions[pid] || null;
+      return out;
+    }
+
+    // -------------------- Rendering: lobby --------------------
+    function renderLobbySeats() {
+      const root = $('lobbySeats');
+      if (!root) return;
+      root.innerHTML = '';
+
+      const players = (() => {
+        if (isHost) {
+          const out = [];
+          if (peer && myId) out.push({id: myId, name: clientState.myName || '房主', isHost:true});
+          for (const pid in hostState.players) out.push({id: pid, name: hostState.players[pid].name, isHost:false});
+          return out;
+        }
+        const out = [];
+        if (hostId) out.push({id: hostId, name: '房主', isHost:true});
+        for (const pid in clientState.players) out.push({id: pid, name: clientState.players[pid].name, isHost:false});
+        return out;
+      })();
+
+      const N = Math.max(0, Math.min(6, players.length));
+      if (!N) return;
+
+      // Use same circle math as game seats (but render only name)
+      const rect = root.getBoundingClientRect();
+      const r = (rect.width && rect.width < 420) ? 38 : 42; // percent
+      const clampPct = (v) => Math.max(10, Math.min(90, v));
+
+      for (let i=0;i<N;i++) {
+        const p = players[i];
+        const angle = (-90 + (360/N)*i) * (Math.PI/180);
+        const x = clampPct(50 + Math.cos(angle)*r);
+        const y = clampPct(50 + Math.sin(angle)*r);
+
+        const seat = el('div', 'absolute -translate-x-1/2 -translate-y-1/2');
+        seat.style.left = x + '%';
+        seat.style.top = y + '%';
+
+        const badge = el('div', 'rounded-2xl bg-black/25 border border-white/10 px-2.5 py-2 w-[104px] sm:w-[126px] overflow-hidden');
+        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate', p.name + (p.isHost ? '（房主）' : ''));
+        badge.appendChild(nameLine);
+        badge.appendChild(el('div','text-[10px] text-emerald-100/70 mt-1', '已入座'));
+
+        seat.appendChild(badge);
+        root.appendChild(seat);
+      }
+    }
+
+    function renderPlayers() {
+      const list = $('playersList');
+      if (list) list.innerHTML = '';
+      const all = [];
+      if (peer && myId) {
+        all.push({id: isHost ? myId : hostId || '(host)', name: isHost ? (clientState.myName+'（房主）') : '房主'});
+      }
+
+      if (!isHost) {
+        for (const pid in clientState.players) all.push({id: pid, name: clientState.players[pid].name});
+      } else {
+        for (const pid in hostState.players) all.push({id: pid, name: hostState.players[pid].name});
+      }
+
+      $('playersCount').textContent = String(all.length);
+
+      if (list) {
+        for (const p of all) {
+          const row = el('div', 'flex items-center justify-between gap-2 rounded-xl bg-black/25 border border-white/10 px-3 py-2');
+          const left = el('div', 'min-w-0');
+          left.appendChild(el('div', 'text-sm text-slate-50 truncate', p.name));
+          left.appendChild(el('div', 'text-xs text-emerald-100/70 mono truncate', p.id));
+          row.appendChild(left);
+          const right = el('div', 'text-xs px-2 py-1 rounded-full bg-amber-300/10 border border-amber-200/20 text-amber-100');
+          right.textContent = (p.id === hostId || (isHost && p.id === myId)) ? 'Host' : 'Player';
+          row.appendChild(right);
+          list.appendChild(row);
+        }
+      }
+
+      setRoleBadges();
+      try { renderLobbySeats(); } catch {}
+      // update table seats if game page is visible
+      try { renderTableSeats(); } catch {}
+    }
+
+    // -------------------- Rendering: game --------------------
+    function currentPlayersListForTable() {
+      // returns [{id,name,isHost}] with deterministic order across devices
+      if (isHost) {
+        const out = [{id: hostId, name: clientState.myName || '房主', isHost:true}];
+        const ids = Object.keys(hostState.players || {}).sort();
+        for (const pid of ids) out.push({id: pid, name: hostState.players[pid].name, isHost:false});
+        return out;
+      }
+      const out = [{id: hostId, name:'房主', isHost:true}];
+      const ids = Object.keys(clientState.players || {}).sort();
+      for (const pid of ids) out.push({id: pid, name: clientState.players[pid].name, isHost:false});
+      return out;
+    }
+
+    function renderTableSeats() {
+      const root = $('tableSeats');
+      if (!root) return;
+      root.innerHTML = '';
+
+      const playersAll = currentPlayersListForTable();
+      const N = Math.max(1, Math.min(6, playersAll.length));
+      const players = playersAll.slice(0, N);
+
+      // center mark
+      const center = el('div', 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2');
+      center.appendChild(el('div', 'rounded-full px-4 py-2 chip text-amber-100 text-xs font-black', 'HKE九張'));
+      root.appendChild(center);
+
+      // Choose a smaller radius on narrow screens to avoid seats going out of bounds
+      const rect = root.getBoundingClientRect();
+      const r = (rect.width && rect.width < 420) ? 36 : 42; // percent
+      const clampPct = (v) => Math.max(12, Math.min(88, v));
+
+      // Rotate seats so "me" is always at the bottom (south) on every device
+      const selfId = isHost ? hostId : myId;
+      const selfIndex = selfId ? players.findIndex(p => p.id === selfId) : -1;
+      const stepDeg = 360 / N;
+      let startDeg = -90;
+      if (selfIndex >= 0) {
+        const selfDeg = startDeg + stepDeg * selfIndex;
+        const delta = 90 - selfDeg;
+        startDeg += delta;
+      }
+
+      // positions around a circle
+      for (let i=0;i<N;i++) {
+        const p = players[i];
+        const angle = (startDeg + stepDeg * i) * (Math.PI/180);
+        const x = clampPct(50 + Math.cos(angle)*r);
+        const y = clampPct(50 + Math.sin(angle)*r);
+
+        const seat = el('div', 'absolute -translate-x-1/2 -translate-y-1/2');
+        seat.style.left = x + '%';
+        seat.style.top = y + '%';
+
+        const badge = el('button', 'relative text-left rounded-2xl bg-black/25 border border-white/10 px-2.5 py-2 w-[104px] sm:w-[126px] overflow-hidden hover:bg-black/30 active:scale-[0.99] transition');
+        badge.type = 'button';
+        badge.dataset.pid = p.id;
+        badge.id = 'seatBadge_' + p.id;
+
+        // Seat name line (dealer crown will be added during reveal)
+        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate', p.name + (p.isHost ? '（房主）' : ''));
+        nameLine.id = 'seatName_' + p.id;
+        badge.appendChild(nameLine);
+
+        // (compat) keep node but do not render reveal cards inside the seat badge
+        const revealBox = el('div', 'hidden');
+        revealBox.id = 'seatReveal_' + p.id;
+        badge.appendChild(revealBox);
+
+        badge.addEventListener('click', (e) => {
+          e.preventDefault();
+          // clicking self seat does nothing
+          const targetId = p.id;
+          const selfId2 = isHost ? hostId : myId;
+          if (!targetId || !selfId2 || targetId === selfId2) return;
+          sendPoopTo(targetId);
+        });
+
+        seat.appendChild(badge);
+        root.appendChild(seat);
+
+        // floating reveal area (outside seat, pulled toward table center)
+        const fx = clampPct(50 + (x - 50) * 0.68);
+        const fy = clampPct(50 + (y - 50) * 0.68);
+        const float = el('div', 'absolute z-[52] pointer-events-none w-[180px] sm:w-[220px]');
+        float.id = 'seatFloat_' + p.id;
+        float.style.left = fx + '%';
+        float.style.top = fy + '%';
+        float.style.transform = 'translate(-50%, -50%)';
+        root.appendChild(float);
+      }
+    }
+
+    function playRevealOnTable(payload) {
+      // Ensure seats exist & order is stable for this reveal
+      try { renderTableSeats(); } catch {}
+
+      const subs = payload?.submissions || {};
+      const results = payload?.results || {};
+      const players = payload?.players || currentPlayersListForTable();
+      const dealerId = payload?.dealerId;
+
+      // Build seat UI: mini cards + right-side text (type + +/- points)
+      const seatUi = {}; // id -> {wrap, headNodes, midNodes, tailNodes}
+
+      // Crown on dealer seat name (inside seat badge)
+      for (const p of (players || [])) {
+        const n = document.getElementById('seatName_' + p.id);
+        if (!n) continue;
+        // remove any old crown
+        n.textContent = (p.name || '').replace(/^👑\s*/,'') + (p.isHost ? '（房主）' : '');
+        if (p.id === dealerId) n.textContent = '👑 ' + n.textContent;
+      }
+
+      const mkCardLine = (count) => {
+        const line = el('div', 'flex gap-0 flex-nowrap');
+        const nodes = [];
+        for (let i=0;i<count;i++) {
+          const n = renderCard(null, {variant:'mini', back:true});
+          n.classList.add('reveal-fan');
+          n.style.animationDelay = '0ms';
+          line.appendChild(n);
+          nodes.push(n);
+        }
+        return { line, nodes };
+      };
+
+      const fmtSigned = (v) => (v > 0 ? `+${v}` : String(v));
+
+      for (const p of (players || [])) {
+        const box = document.getElementById('seatFloat_' + p.id) || document.getElementById('seatReveal_' + p.id);
+        if (!box) continue;
+        box.innerHTML = '';
+        const sub = subs[p.id];
+        if (!sub) continue;
+
+        const wrap = el('div', 'reveal-fan rounded-lg bg-black/25 border border-white/10 p-[3px] w-full');
+        wrap.style.animationDelay = (Math.random()*80) + 'ms';
+
+        const r = results[p.id] || { per:{head:0,mid:0,tail:0}, total:0, evalNames:{head:'',mid:'',tail:''}, note:'', report:'none' };
+        const e = r.evalNames || {};
+        const per = r.per || {head:0,mid:0,tail:0};
+
+        const noteStr = String(r.note || '');
+        const isWulong = noteStr.includes('擺烏龍');
+        const isReportOnly = (!isWulong) && (r.report && r.report !== 'none') && noteStr.includes('只計報到');
+        const reportBonus = isReportOnly ? Number(r.total || 0) : 0;
+
+        const shortReportName = (code) => {
+          const full = String(specialLabel(code) || '').trim();
+          const idx = full.indexOf(' +');
+          return idx > 0 ? full.slice(0, idx) : full;
+        };
+
+        const mkLine = (label, evalName, v, mode='normal') => {
+          const row = el('div','flex items-center gap-2');
+          const left = el('div','shrink-0 flex items-center gap-0');
+          row.appendChild(left);
+
+          // 報到模式：不顯示三墩牌型/分數文字，只顯示卡片
+          if (mode === 'report') return {row, left};
+
+          const right = el('div','min-w-0 flex-1 text-[10px] leading-tight text-emerald-50/90 flex items-center justify-between gap-2');
+
+          const txt = el('div','truncate');
+          if (mode === 'wulong') {
+            txt.innerHTML = `<span class="text-rose-200 font-black">擺烏龍</span>`;
+          } else {
+            txt.innerHTML = `<span class="text-emerald-100/70">${label}</span> ${evalName||''}`;
+          }
+
+          const scoreText = fmtSigned(v||0);
+          const scoreCls = (v>0?'text-emerald-200':(v<0?'text-rose-200':'text-emerald-50/60'));
+          const score = el('div', `shrink-0 mono font-black ${scoreCls}`, scoreText);
+
+          right.appendChild(txt);
+          right.appendChild(score);
+          row.appendChild(right);
+          return {row, left};
+        };
+
+        const head = mkCardLine(2);
+        const mid  = mkCardLine(3);
+        const tail = mkCardLine(3);
+
+        const mode = isWulong ? 'wulong' : (isReportOnly ? 'report' : 'normal');
+        const l1 = mkLine('頭', e.head, per.head||0, mode);
+        const l2 = mkLine('中', e.mid, per.mid||0, mode);
+        const l3 = mkLine('尾', e.tail, per.tail||0, mode);
+
+        l1.left.appendChild(head.line);
+        l2.left.appendChild(mid.line);
+        l3.left.appendChild(tail.line);
+
+        // Vertical ~50% overlap between sections
+        l2.row.classList.add('-mt-[18px]');
+        l3.row.classList.add('-mt-[18px]');
+
+        wrap.appendChild(l1.row);
+        wrap.appendChild(l2.row);
+        wrap.appendChild(l3.row);
+
+        if (mode === 'report') {
+          const repLine = el('div', 'mt-[2px] text-[10px] font-black text-amber-100', `報到：${shortReportName(r.report)} +${reportBonus}`);
+          wrap.appendChild(repLine);
+        } else {
+          // total line
+          const totalLine = el('div','mt-[2px] text-[10px] font-black mono text-right');
+          totalLine.className = 'mt-[2px] text-[10px] font-black mono text-right ' + (Number(r.total||0)>0?'text-emerald-200':(Number(r.total||0)<0?'text-rose-200':'text-emerald-50/70'));
+          totalLine.textContent = `本局 ${fmtSigned(Number(r.total||0))}`;
+          wrap.appendChild(totalLine);
+        }
+
+        box.appendChild(wrap);
+        seatUi[p.id] = {wrap, head: head.nodes, mid: mid.nodes, tail: tail.nodes};
+      }
+
+      // ---------- sequential reveal order ----------
+      const evalFor = (pid, section) => {
+        const sub = subs[pid];
+        if (!sub) return null;
+        if (section === 'head') return eval2(sub.head);
+        if (section === 'mid') return eval3(sub.mid);
+        if (section === 'tail') return eval3(sub.tail);
+        return null;
+      };
+
+      const sortPlayersBySection = (section) => {
+        const list = (players || []).filter(p => p.id !== dealerId && subs[p.id]);
+        // small -> big
+        list.sort((a,b) => {
+          const ea = evalFor(a.id, section);
+          const eb = evalFor(b.id, section);
+          const cmp = compareEval(ea, eb);
+          if (cmp !== 0) return cmp;
+          return String(a.id) < String(b.id) ? -1 : 1;
+        });
+        return list;
+      };
+
+      const steps = [];
+      const pushReveal = (pid, section, cards) => {
+        steps.push({pid, section, cards});
+      };
+
+      // Dealer first each section, then others by small->big
+      const dealerSub = subs[dealerId];
+      if (dealerSub) pushReveal(dealerId, 'head', dealerSub.head);
+      for (const p of sortPlayersBySection('head')) pushReveal(p.id, 'head', subs[p.id].head);
+
+      if (dealerSub) pushReveal(dealerId, 'mid', dealerSub.mid);
+      for (const p of sortPlayersBySection('mid')) pushReveal(p.id, 'mid', subs[p.id].mid);
+
+      if (dealerSub) pushReveal(dealerId, 'tail', dealerSub.tail);
+      for (const p of sortPlayersBySection('tail')) pushReveal(p.id, 'tail', subs[p.id].tail);
+
+      const flipOne = (placeholderNode, card) => {
+        const parent = placeholderNode.parentElement;
+        const newNode = renderCard(card, {variant:'mini'});
+        newNode.classList.add('reveal-fan');
+        newNode.style.animationDelay = '0ms';
+        parent.replaceChild(newNode, placeholderNode);
+        return newNode;
+      };
+
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+      (async () => {
+        let delay = 240; // slow down ~2x
+        for (const step of steps) {
+          const ui = seatUi[step.pid];
+          if (!ui) continue;
+          const nodes = ui[step.section];
+          if (!nodes) continue;
+          for (let i=0;i<Math.min(nodes.length, step.cards.length);i++) {
+            const old = nodes[i];
+            const newNode = flipOne(old, step.cards[i]);
+            nodes[i] = newNode;
+            await sleep(delay);
+            delay = Math.max(140, delay - 8);
+          }
+          await sleep(240);
+        }
+      })();
+    }
+
+    // -------------------- Rendering: game --------------------
+    function getNameById(id) {
+      if (!id) return '—';
+      if (id === hostId && isHost) return clientState.myName + '（房主）';
+      if (isHost) {
+        if (id === hostId) return clientState.myName + '（房主）';
+        return hostState.players[id]?.name || id;
+      }
+      if (id === hostId) return '房主';
+      return clientState.players[id]?.name || id;
+    }
+
+    function updateMyCumulative() {
+      const id = isHost ? hostId : myId;
+      const v = Number((isHost ? hostState.cumulative : clientState.cumulative)?.[id] || 0);
+      $('myCumulative').textContent = String(v);
+    }
+
+    function renderGameHeader() {
+      const room = isHost ? (myId || '—') : (clientState.roomId || '—');
+      $('gameRoomId').textContent = room;
+      const roundsTotal = isHost ? hostState.settings.roundsTotal : clientState.settings.roundsTotal;
+      const round = isHost ? hostState.round : clientState.round;
+      $('gameRoundInfo').textContent = round ? `${round} / ${roundsTotal}` : `— / ${roundsTotal}`;
+      const dealerId = isHost ? hostState.dealerId : clientState.dealerId;
+      $('dealerName').textContent = dealerId ? getNameById(dealerId) : '待定';
+
+      updateMyCumulative();
+      renderDealerCardSlot();
+    }
+
+    function renderCard(c, opts={}) {
+      // opts:
+      // - variant: 'hand' | 'slot' | 'mini'
+      // - back: boolean (render card back)
+      const key = c ? cardKey(c) : '';
+      const isJ = c?.s === 'J';
+
+      const variant = opts.variant || (opts.small ? 'slot' : 'hand');
+      const sizeCls = variant === 'slot'
+        ? 'pc-slot w-[44px] h-[62px] sm:w-[50px] sm:h-[70px]'
+        : (variant === 'mini'
+          ? 'pc-mini w-[25px] h-[35px] sm:w-[30px] sm:h-[42px]'
+          : (variant === 'hand'
+            ? 'pc-hand w-[66px] h-[92px] sm:w-[72px] sm:h-[100px]'
+            : 'pc-hand w-[92px] h-[128px]'));
+
+      const suitClass = !c ? '' : (isJ ? 'text-violet-700' : SUIT_COLOR[c.s]);
+
+      const btn = el('button', `card poker-card ${sizeCls} ${isJ ? 'pc-joker' : ''} ${variant==='mini' ? 'pc-mini' : ''} ${suitClass} transition`);
+      if (opts.back) btn.classList.add('card-back');
+      if (key) btn.dataset.key = key;
+      btn.style.borderColor = opts.selected ? 'rgba(99,102,241,.9)' : 'rgba(15,23,42,.22)';
+
+      // If back, do not render faces
+      if (opts.back) return btn;
+      if (!c) return btn;
+
+      // content
+      const tl = el('div', 'pcorner tl');
+      const br = el('div', 'pcorner br');
+
+      if (isJ) {
+        tl.appendChild(el('div','prank', 'J'));
+        tl.appendChild(el('div','psuit', '☆'));
+        br.appendChild(el('div','prank', 'J'));
+        br.appendChild(el('div','psuit', '☆'));
+
+        const center = el('div','pcenter');
+        center.textContent = (c.j === 'BJ') ? '大鬼' : '細鬼';
+        btn.appendChild(center);
+      } else {
+        const rank = c.r;
+        const rtxt = rank<=10 ? String(rank) : (rank===11?'J':rank===12?'Q':rank===13?'K':'A');
+        const suit = SUIT_ICON[c.s];
+
+        tl.appendChild(el('div','prank', rtxt));
+        tl.appendChild(el('div','psuit', suit));
+        br.appendChild(el('div','prank', rtxt));
+        br.appendChild(el('div','psuit', suit));
+
+        const center = el('div','pcenter', suit);
+        btn.appendChild(center);
+      }
+
+      btn.appendChild(tl);
+      btn.appendChild(br);
+
+      if (opts.selected) {
+        btn.classList.add('ring-2', 'ring-indigo-500/30');
+      }
+      if (opts.locked) {
+        btn.classList.add('opacity-95');
+        btn.disabled = true;
+      }
+      return btn;
+    }
+
+    function currentHandCards() {
+      const dealerKey = clientState.dealerCard ? cardKey(clientState.dealerCard) : null;
+      return (clientState.cards9 || [])
+        .filter(c => cardKey(c) !== dealerKey)
+        .filter(c => !clientState.usedFromHand.has(cardKey(c)));
+    }
+
+    function renderDealerCardSlot() {
+      const slot = $('dealerCardSlot');
+      slot.innerHTML = '';
+
+      if (!clientState.dealerCard) {
+        const box = el('div', 'h-[62px] w-[44px] sm:h-[70px] sm:w-[50px] rounded-lg border border-dashed border-amber-200/30 bg-black/10 flex items-center justify-center text-[10px] font-black text-amber-100/90 text-center leading-snug', '選莊');
+        box.addEventListener('click', (e) => {
+          if (e.target.closest('button')) return;
+          if (clientState.submitted) return;
+          if (!clientState.pick) return;
+          // move selected card into dealer slot
+          onPick({zone:'dealer'});
+        });
+        slot.appendChild(box);
+        return;
+      }
+
+      const selected = clientState.pick?.zone === 'dealer';
+      const btn = renderCard(clientState.dealerCard, {variant:'slot', selected});
+      btn.addEventListener('click', () => onPick({zone:'dealer'}));
+      slot.appendChild(btn);
+    }
+
+    function renderHand() {
+      updateSelectedHint();
+      const hand = $('hand');
+      if (!hand) return;
+      hand.innerHTML = '';
+      const cards = currentHandCards();
+      for (let i=0;i<cards.length;i++) {
+        const c = cards[i];
+        const key = cardKey(c);
+        const selected = clientState.pick?.zone==='hand' && clientState.pick.key===key;
+        const btn = renderCard(c, {variant:'hand', selected});
+
+        // Overlap like a real hand: each next card covers ~50%
+        if (i > 0) btn.classList.add('hand-overlap');
+        btn.style.zIndex = selected ? String(50 + i) : String(i);
+
+        btn.classList.add('deal-card');
+        btn.style.animationDelay = `${Math.min(10,i)*35}ms`;
+        btn.addEventListener('click', () => onPick({zone:'hand', key}));
+        hand.appendChild(btn);
+      }
+    }
+
+    function labelForKey(key) {
+      const c = clientState.cards9.find(x => cardKey(x)===key) || (clientState.dealerCard && cardKey(clientState.dealerCard)===key ? clientState.dealerCard : null);
+      return c ? cardLabel(c) : key;
+    }
+
+    function rebuildUsedFromHand() {
+      const s = new Set();
+      for (const slotName of ['head','mid','tail']) {
+        for (const c of (clientState.arranged[slotName] || [])) {
+          if (c) s.add(cardKey(c));
+        }
+      }
+      clientState.usedFromHand = s;
+    }
+
+    function refCard(ref) {
+      if (!ref) return null;
+      if (ref.zone === 'hand') return clientState.cards9.find(x => cardKey(x) === ref.key) || null;
+      if (ref.zone === 'dealer') return clientState.dealerCard || null;
+      if (ref.zone === 'slot') return clientState.arranged?.[ref.slot]?.[ref.idx] || null;
+      return null;
+    }
+
+    function sameRef(a,b) {
+      if (!a || !b) return false;
+      if (a.zone !== b.zone) return false;
+      if (a.zone === 'hand') return a.key === b.key;
+      if (a.zone === 'dealer') return true;
+      if (a.zone === 'slot') return a.slot === b.slot && a.idx === b.idx;
+      return false;
+    }
+
+    function updateSelectedHint() {
+      const p = clientState.pick;
+      if (!p) {
+        $('selectedHint').textContent = '未選取牌';
+        return;
+      }
+      let label = '';
+      if (p.zone === 'hand') label = `手牌：${labelForKey(p.key)}`;
+      if (p.zone === 'dealer') label = `選莊牌：${cardLabel(clientState.dealerCard)}`;
+      if (p.zone === 'slot') {
+        const cname = p.slot==='head' ? '頭墩' : (p.slot==='mid' ? '中墩' : '尾墩');
+        const c = clientState.arranged[p.slot][p.idx];
+        label = `${cname}#${p.idx+1}：${c ? cardLabel(c) : '—'}`;
+      }
+      $('selectedHint').textContent = `已選取（可再點另一張牌互換；點空格可移動）：${label}`;
+    }
+
+    function clearPick() {
+      clientState.pick = null;
+      updateSelectedHint();
+    }
+
+    function applySwapOrMove(aRef, bRef) {
+      if (!aRef || !bRef) return;
+      const a = refCard(aRef);
+      const b = refCard(bRef);
+
+      // hand <-> hand: swap order only
+      if (aRef.zone === 'hand' && bRef.zone === 'hand') {
+        const i = clientState.cards9.findIndex(c => cardKey(c) === aRef.key);
+        const j = clientState.cards9.findIndex(c => cardKey(c) === bRef.key);
+        if (i >= 0 && j >= 0) [clientState.cards9[i], clientState.cards9[j]] = [clientState.cards9[j], clientState.cards9[i]];
+        return;
+      }
+
+      // If destination has no card: treat as move
+      if (a && !b) {
+        if (bRef.zone === 'dealer') {
+          // move to dealer slot
+          clientState.dealerCard = a;
+          if (aRef.zone === 'slot') clientState.arranged[aRef.slot][aRef.idx] = null;
+          if (aRef.zone === 'dealer') clientState.dealerCard = null;
+        }
+        if (bRef.zone === 'slot') {
+          clientState.arranged[bRef.slot][bRef.idx] = a;
+          if (aRef.zone === 'slot') clientState.arranged[aRef.slot][aRef.idx] = null;
+          if (aRef.zone === 'dealer') clientState.dealerCard = null;
+        }
+        rebuildUsedFromHand();
+        return;
+      }
+      if (!a && b) {
+        // swapOrMove(b,a)
+        applySwapOrMove(bRef, aRef);
+        return;
+      }
+      if (!a && !b) return;
+
+      // swap non-hand refs
+      if (aRef.zone === 'dealer' && bRef.zone === 'slot') {
+        clientState.dealerCard = b;
+        clientState.arranged[bRef.slot][bRef.idx] = a;
+        rebuildUsedFromHand();
+        return;
+      }
+      if (aRef.zone === 'slot' && bRef.zone === 'dealer') {
+        clientState.arranged[aRef.slot][aRef.idx] = b;
+        clientState.dealerCard = a;
+        rebuildUsedFromHand();
+        return;
+      }
+
+      if (aRef.zone === 'slot' && bRef.zone === 'slot') {
+        clientState.arranged[aRef.slot][aRef.idx] = b;
+        clientState.arranged[bRef.slot][bRef.idx] = a;
+        rebuildUsedFromHand();
+        return;
+      }
+
+      // hand <-> dealer
+      if (aRef.zone === 'hand' && bRef.zone === 'dealer') {
+        clientState.dealerCard = a;
+        return;
+      }
+      if (aRef.zone === 'dealer' && bRef.zone === 'hand') {
+        clientState.dealerCard = b;
+        return;
+      }
+
+      // hand <-> slot
+      if (aRef.zone === 'hand' && bRef.zone === 'slot') {
+        clientState.arranged[bRef.slot][bRef.idx] = a;
+        rebuildUsedFromHand();
+        return;
+      }
+      if (aRef.zone === 'slot' && bRef.zone === 'hand') {
+        clientState.arranged[aRef.slot][aRef.idx] = b;
+        rebuildUsedFromHand();
+        return;
+      }
+    }
+
+    function onPick(ref) {
+      if (clientState.submitted) {
+        toast('已提交，無法更動');
+        return;
+      }
+
+      if (!clientState.pick) {
+        clientState.pick = ref;
+        updateSelectedHint();
+        renderGameHeader();
+        renderHand();
+        renderSlots();
+        return;
+      }
+
+      if (sameRef(clientState.pick, ref)) {
+        clearPick();
+        renderGameHeader();
+        renderHand();
+        renderSlots();
+        return;
+      }
+
+      applySwapOrMove(clientState.pick, ref);
+      clearPick();
+
+      // Dealer card might be Joker; dealer will be decided in pre-reveal dealer-pick phase.
+      // Clear any previous per-submit dealer target (feature removed).
+      if (!(clientState.dealerCard && clientState.dealerCard.s === 'J')) {
+        clientState.dealerTargetId = null;
+      }
+
+      renderGameHeader();
+      renderHand();
+      renderSlots();
+    }
+
+    function renderSlotCell(slotName, idx) {
+      // Poker-card slot (match card aspect ratio) - ultra compact
+      const cell = el('div', 'h-[62px] w-[44px] sm:h-[70px] sm:w-[50px] rounded-md border border-white/10 bg-black/20 p-[1px] flex items-center justify-center');
+      const arr = clientState.arranged[slotName];
+      const c = arr[idx];
+
+      if (!c) {
+        cell.appendChild(el('div', 'text-[10px] text-emerald-100/55 text-center leading-snug', '放牌'));
+      } else {
+        const selected = clientState.pick?.zone==='slot' && clientState.pick.slot===slotName && clientState.pick.idx===idx;
+        const btn = renderCard(c, {variant:'slot', selected});
+        btn.addEventListener('click', () => onPick({zone:'slot', slot: slotName, idx}));
+        cell.appendChild(btn);
+      }
+
+      cell.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        if (clientState.submitted) return;
+        if (!clientState.pick) return;
+        // move selected into this empty slot
+        onPick({zone:'slot', slot: slotName, idx});
+      });
+
+      return cell;
+    }
+
+    function renderSlots() {
+      const sizes = { head: 2, mid: 3, tail: 3 };
+      const makeSlot = (id, slotName) => {
+        const root = $(id);
+        root.innerHTML = '';
+        for (let i=0;i<sizes[slotName];i++) root.appendChild(renderSlotCell(slotName, i));
+      };
+
+      makeSlot('slotHead', 'head');
+      makeSlot('slotMid', 'mid');
+      makeSlot('slotTail', 'tail');
+
+      const h = clientState.arranged.head;
+      const m = clientState.arranged.mid;
+      const t = clientState.arranged.tail;
+      $('headEval').textContent = isAllFilled(h) ? eval2(h).name : '—';
+      $('midEval').textContent = isAllFilled(m) ? eval3(m).name : '—';
+      $('tailEval').textContent = isAllFilled(t) ? eval3(t).name : '—';
+
+      // 不再即時提示擺烏龍（允許提交；結算時才處理）
+      $('foulHint').textContent = '擺烏龍：頭 > 中 或 中 > 尾（允許提交；擺烏龍者會自動當莊並三墩全輸；報到不符亦作擺烏龍）';
+      $('foulHint').className = 'text-xs text-emerald-100/70';
+    }
+
+    function updateMidActionButton() {
+      const btn = $('btnMidAction');
+      if (!btn) return;
+      const canNext = isHost && !!hostState.revealed;
+      btn.textContent = canNext ? '下一局' : '牌組';
+
+      // Reset class to baseline then add active style
+      btn.className = 'flex-1 text-xs px-3 py-2 rounded-xl border ' + (canNext
+        ? 'bg-gradient-to-b from-emerald-400 to-emerald-500 text-emerald-950 font-semibold border-emerald-200/20'
+        : 'bg-white/10 hover:bg-white/15 text-slate-50 border-white/10');
+    }
+
+    function renderReadyList(readyMap=null) {
+      const root = $('readyList');
+      if (!root) return;
+      root.innerHTML = '';
+
+      let players = [];
+      if (isHost) {
+        players = [{id: hostId, name: clientState.myName + '（房主）'}];
+        for (const pid in hostState.players) players.push({id: pid, name: hostState.players[pid].name});
+      } else {
+        players = [{id: hostId, name: '房主'}];
+        for (const pid in clientState.players) players.push({id: pid, name: clientState.players[pid].name});
+      }
+
+      const rmap = readyMap || null;
+
+      for (const p of players) {
+        const row = el('div', 'flex items-center justify-between gap-2 rounded-xl bg-black/25 border border-white/10 px-3 py-2');
+        row.appendChild(el('div', 'text-sm text-slate-50 truncate', p.name));
+        const ready = rmap ? !!rmap[p.id] : false;
+        const badge = el('div', `text-xs px-2 py-1 rounded-full ${ready ? 'bg-emerald-500/15 border border-emerald-300/25 text-emerald-100' : 'bg-white/10 border border-white/10 text-emerald-50/80'}`, ready ? '已提交' : '未提交');
+        row.appendChild(badge);
+        root.appendChild(row);
+      }
+
+      if (isHost) {
+        $('btnNextRound').classList.toggle('hidden', !hostState.revealed);
+      }
+    }
+
+    function renderScores(revealPayload) {
+      const body = $('scoreBody');
+      if (!body) return;
+      body.innerHTML = '';
+      if (!revealPayload) return;
+
+      const players = revealPayload.players || [];
+      const dealerId = revealPayload.dealerId;
+      const results = revealPayload.results || {};
+      const subs = revealPayload.submissions || {};
+      const cumulative = revealPayload.cumulative || {};
+
+      const sorted = [...players].sort((a,b) => {
+        if (a.id===dealerId) return -1;
+        if (b.id===dealerId) return 1;
+        return (results[b.id]?.total||0) - (results[a.id]?.total||0);
+      });
+
+      for (const p of sorted) {
+        const r = results[p.id] || {per:{head:0,mid:0,tail:0}, total:0, note:'', report:'none'};
+        const sub = subs[p.id];
+        const dc = sub?.dealerCard;
+
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-white/5 align-top';
+
+        const tdName = el('td','py-2 pr-2');
+        tdName.appendChild(el('div','text-sm text-slate-50', p.name + (p.id===dealerId?'（莊）':'')));
+        tdName.appendChild(el('div','text-[10px] text-emerald-100/70 mono', p.id));
+
+        const tdDealer = el('td','py-2 pr-2 text-slate-50 text-xs');
+        tdDealer.textContent = dc ? cardLabel(dc) : '—';
+
+        const mk = (v) => {
+          const s = v>0?`+${v}`:String(v);
+          const cls = v>0?'text-emerald-200':(v<0?'text-rose-200':'text-emerald-50/80');
+          return el('td',`py-2 pr-2 ${cls} mono`, s);
+        };
+
+        const tdRep = el('td','py-2 pr-2 text-emerald-50/80 text-xs');
+        tdRep.textContent = r.report==='none' ? '—' : specialLabel(r.report);
+
+        const tdTotal = el('td','py-2 pr-2 font-black mono', String(r.total));
+        tdTotal.classList.add(r.total>0?'text-emerald-200':(r.total<0?'text-rose-200':'text-emerald-50/80'));
+
+        const cumVal = Number(cumulative[p.id] || 0);
+        const tdCum = el('td','py-2 pr-2 font-black mono', String(cumVal));
+        tdCum.classList.add(cumVal>0?'text-emerald-200':(cumVal<0?'text-rose-200':'text-emerald-50/80'));
+
+        const tdNote = el('td','py-2 pr-2 text-xs text-emerald-50/70', r.note || '');
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdDealer);
+        tr.appendChild(mk(r.per.head||0));
+        tr.appendChild(mk(r.per.mid||0));
+        tr.appendChild(mk(r.per.tail||0));
+        tr.appendChild(tdRep);
+        tr.appendChild(tdTotal);
+        tr.appendChild(tdCum);
+        tr.appendChild(tdNote);
+
+        body.appendChild(tr);
+      }
+
+      renderReadyList(readyMapForReveal(revealPayload));
+
+      function readyMapForReveal(payload) {
+        const rm = {};
+        for (const p of (payload.players||[])) rm[p.id] = !!payload.submissions?.[p.id];
+        return rm;
+      }
+    }
+
+    // -------------------- Submit / Arrange --------------------
+    function resetArrange() {
+      clientState.arranged = { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      clientState.usedFromHand = new Set();
+      clientState.selectedCardKey = null;
+      $('selectedHint').textContent = '未選取牌';
+      renderHand();
+      renderSlots();
+    }
+
+    function autoFillRandomNoFoul() {
+      if (clientState.submitted) return;
+      resetArrange();
+
+      // pick dealer card if not chosen
+      let dealer = clientState.dealerCard;
+      for (let tries=0; tries<80; tries++) {
+        const pool = [...(clientState.cards9 || [])];
+        shuffle(pool);
+        if (!dealer) dealer = pool.shift();
+        const dk = cardKey(dealer);
+        const di = pool.findIndex(c => cardKey(c)===dk);
+        if (di >= 0) pool.splice(di,1);
+
+        if (pool.length !== 8) {
+          dealer = null;
+          continue;
+        }
+
+        const head = pool.slice(0,2);
+        const mid = pool.slice(2,5);
+        const tail = pool.slice(5,8);
+
+        const foul = detectFoul(head, mid, tail);
+        if (!foul.foul) {
+          clientState.dealerCard = dealer;
+          clientState.arranged.head = head;
+          clientState.arranged.mid = mid;
+          clientState.arranged.tail = tail;
+          clientState.usedFromHand = new Set(pool.map(cardKey));
+          renderGameHeader();
+          renderHand();
+          renderSlots();
+          return;
+        }
+
+        dealer = null;
+      }
+
+      toast('快速排失敗（找不到不擺烏龍組合），請手動排');
+    }
+
+    function validateArrangement() {
+      const {head,mid,tail} = clientState.arranged;
+      if (!clientState.dealerCard) return {ok:false, msg:'請先選 1 張作為選莊牌'};
+      if (!isAllFilled(head) || !isAllFilled(mid) || !isAllFilled(tail)) return {ok:false, msg:'請先把頭/中/尾墩放滿（2/3/3）'};
+      const used = new Set([...head,...mid,...tail].map(cardKey));
+      if (used.size !== 8) return {ok:false, msg:'牌重複或有問題，請重排'};
+      const dk = cardKey(clientState.dealerCard);
+      if (used.has(dk)) return {ok:false, msg:'選莊牌不可放入頭/中/尾墩，請更換'};
+      // 允許「擺烏龍」提交（結算時會依規則處理）
+      return {ok:true};
+    }
+
+    function submitArrangement() {
+      const v = validateArrangement();
+      if (!v.ok) { toast(v.msg); return; }
+
+      const payload = {
+        t:'submit',
+        dealerCard: clientState.dealerCard,
+        head: clientState.arranged.head,
+        mid: clientState.arranged.mid,
+        tail: clientState.arranged.tail,
+        report: $('selReport').value || 'none',
+      };
+
+      if (isHost) {
+        const ok = validateSubmissionAgainstDeal(hostId, payload);
+        if (!ok.ok) {
+          toast(ok.msg);
+          return;
+        }
+        hostState.submissions[hostId] = { dealerCard: payload.dealerCard, head: payload.head, mid: payload.mid, tail: payload.tail, report: payload.report };
+        glog('你已提交排牌');
+        $('submitStatus').textContent = '已提交';
+        $('submitStatus').className = 'text-xs text-emerald-200';
+        clientState.submitted = true;
+
+        // auto close arrange modal back to table
+        try { closeArrangeModal(); } catch {}
+
+        broadcast({t:'ready', ready: readyMapForBroadcast()});
+        renderReadyList(readyMapForBroadcast());
+
+        if (allSubmitted()) {
+          const controller = findDealerPickController(hostState.submissions);
+          if (controller) {
+            hostState.dealerPick = { ...controller, round: hostState.round, startedAt: Date.now() };
+            hostState.dealerOverride = null;
+            const ctx = {
+              t: 'dealerPickStart',
+              round: hostState.round,
+              controllerId: controller.controllerId,
+              kind: controller.kind,
+              submissions: sanitizeSubsForBroadcast(),
+              players: allPlayersForBroadcast(),
+            };
+            if (controller.controllerId === hostId) {
+              openDealerPickPreModal({
+                round: ctx.round,
+                kind: ctx.kind,
+                controllerId: ctx.controllerId,
+                submissions: ctx.submissions,
+                players: ctx.players,
+                currentDealerId: hostId,
+              });
+              toast('你持有鬼牌：請在結算前指定莊家');
+            } else {
+              const p = hostState.players[controller.controllerId];
+              if (p?.conn) send(p.conn, ctx);
+              toast('等待鬼牌玩家指定莊家…');
+              log(`等待 ${hostState.players[controller.controllerId]?.name || controller.controllerId} 指定莊家`);
+            }
+          } else {
+            revealRound();
+          }
+        }
+        return;
+      }
+
+      if (!clientState.connected || !clientState.roomId || !clientConn) {
+        toast('尚未連線到房主');
+        return;
+      }
+
+      try {
+        send(clientConn, payload);
+        clientState.submitted = true;
+        $('submitStatus').textContent = '已提交';
+        $('submitStatus').className = 'text-xs text-emerald-200';
+        glog('已送出提交');
+
+        // auto close arrange modal back to table
+        try { closeArrangeModal(); } catch {}
+      } catch (e) {
+        toast('提交失敗：連線錯誤');
+      }
+    }
+
+    // -------------------- Connect flows --------------------
+    let clientConn = null; // persistent connection from client -> host
+
+    function becomeHost() {
+      ensureName();
+      isHost = true;
+      hostId = null;
+
+      const custom = ($('inpCustomRoomId')?.value || '').trim();
+      const ok = !custom || /^[a-zA-Z0-9_-]{3,32}$/.test(custom);
+      if (!ok) {
+        toast('自訂房間號格式不正確：請用 3～32 字的英數/底線/減號');
+        return;
+      }
+
+      setBadge(false, '建立中…');
+      createPeerIfNeeded(custom || null);
+      setRoleBadges();
+      log(custom ? `正在建立房間：${custom} …` : '正在建立房間…');
+
+      const intv = setInterval(() => {
+        if (myId) {
+          clearInterval(intv);
+          broadcastPlayers();
+          renderPlayers();
+          setRoleBadges();
+          hostApplyRounds();
+          hostState.cumulative = {};
+          clientState.cumulative = {};
+          updateMyCumulative();
+          setBadge(true, '房間已建立');
+          log('房間已建立，等待玩家加入');
+        }
+      }, 80);
+    }
+
+    function joinRoom(roomId) {
+      ensureName();
+      let rid = String(roomId || '').trim();
+      // remove invisible spaces that may break peer id parsing
+      rid = rid.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+      if (!rid) { toast('請輸入房間號'); return; }
+
+      // "Old" stable join behavior:
+      // - Do NOT call resetAll() here (it wipes too much UI state and can cause DOM-id null errors)
+      // - Instead, teardown only networking objects and keep the UI/input intact.
+      try {
+        if (clientConn) { try { clientConn.close(); } catch {} }
+      } catch {}
+      clientConn = null;
+
+      if (peer) {
+        try { peer.destroy(); } catch {}
+      }
+      peer = null;
+      myId = null;
+
+      isHost = false;
+      hostId = rid;
+      clientState.roomId = rid;
+      clientState.players = {};
+      clientState.connected = false;
+      clientState.joining = true;
+      setBadge(false, '連線中…');
+
+      createPeerIfNeeded();
+      setRoleBadges();
+      renderPlayers();
+      log(`正在加入房間：${rid} … (${JSON.stringify(rid)})`);
+
+      const startedAt = Date.now();
+      const waitPeer = setInterval(() => {
+        if (!(peer && myId)) return;
+        clearInterval(waitPeer);
+
+        let attempts = 0;
+        const maxAttempts = 4;
+
+        const attempt = () => {
+          if (clientState.connected) return;
+          attempts += 1;
+
+          try {
+            if (clientConn) { try{clientConn.close();}catch{} }
+          } catch {}
+
+          setBadge(false, `連線中…（第 ${attempts}/${maxAttempts} 次）`);
+          log(`嘗試連線到房主（第 ${attempts}/${maxAttempts} 次）：${rid}`);
+
+          try {
+            // Use the most compatible connect() signature.
+            clientConn = peer.connect(rid);
+            wireConn(clientConn, false);
+          } catch (e) {
+            log('peer.connect 失敗：' + (e?.message || e));
+          }
+
+          if (attempts < maxAttempts) {
+            setTimeout(() => {
+              if (!clientState.connected) attempt();
+            }, 2000);
+          }
+        };
+
+        attempt();
+
+        const timer = setInterval(() => {
+          if (clientState.connected) {
+            clearInterval(timer);
+            return;
+          }
+          if (Date.now() - startedAt > 14000) {
+            clearInterval(timer);
+            clientState.joining = false;
+            toast('加入房間逾時：請確認房主已建立房間且網路可用；若跨網絡/NAT 仍連不上，請測試/設定 TURN（進階連線）');
+            setBadge(false, '逾時');
+          }
+        }, 250);
+      }, 80);
+    }
+
+    // -------------------- URL helper --------------------
+    function updateShareLink(roomId) {
+      if (location.protocol === 'file:') {
+        throw new Error('目前是以本機檔案(file://)開啟，無法跨裝置分享連結。請用 http(s) 方式部署後再分享。');
+      }
+      const base = location.origin + location.pathname;
+      const url = new URL(base);
+      url.searchParams.set('room', roomId);
+      return url.toString();
+    }
+
+    // -------------------- Event bindings --------------------
+    $('btnSaveName').addEventListener('click', () => {
+      ensureName();
+      toast('已儲存暱稱');
+      renderPlayers();
+    });
+
+    $('btnCreateRoom').addEventListener('click', () => {
+      // Persist TURN toggle
+      try {
+        const cfg = loadNetConfig();
+        cfg.useTurn = !!$('chkUseTurn')?.checked;
+        saveNetConfig(cfg);
+      } catch {}
+
+      // Use inpRoomId as optional custom room id (create)
+      try {
+        const v = ($('inpRoomId')?.value || '').trim();
+        $('inpCustomRoomId').value = v; // keep internal create flow consistent
+      } catch {}
+
+      if (peer) resetAll();
+      becomeHost();
+    });
+
+    $('btnJoinRoom').addEventListener('click', () => {
+      // Persist TURN toggle
+      try {
+        const cfg = loadNetConfig();
+        cfg.useTurn = !!$('chkUseTurn')?.checked;
+        saveNetConfig(cfg);
+      } catch {}
+
+      const rid = ($('inpRoomId').value || '').trim();
+      if (!rid) return toast('請輸入房間號');
+      if (peer) resetAll();
+      joinRoom(rid);
+    });
+
+    $('btnLeave').addEventListener('click', () => {
+      resetAll();
+      showPage('lobby');
+    });
+
+    $('btnCopyRoom').addEventListener('click', async () => {
+      if (!myId) return;
+      await navigator.clipboard.writeText(myId);
+      toast('已複製房間號');
+    });
+
+    $('btnCopyLink').addEventListener('click', async () => {
+      const rid = isHost ? myId : clientState.roomId;
+      if (!rid) return toast(isHost ? '請先建立房間（取得 Peer ID）' : '尚未取得房間號');
+      try {
+        const link = updateShareLink(rid);
+        await navigator.clipboard.writeText(link);
+        toast('已複製分享連結（打開即可自動加入）');
+      } catch (e) {
+        toast(e?.message || '無法產生分享連結');
+      }
+    });
+
+    // Advanced net config
+    const chkUseTurnEl = $('chkUseTurn');
+    if (chkUseTurnEl) {
+      chkUseTurnEl.addEventListener('change', () => {
+        try {
+          const cfg = loadNetConfig();
+          cfg.useTurn = !!chkUseTurnEl.checked;
+          saveNetConfig(cfg);
+        } catch {}
+      });
+    }
+
+    const btnSaveNet = $('btnSaveNet');
+    const btnClearNet = $('btnClearNet');
+    const btnTestTurn = $('btnTestTurn');
+    if (btnSaveNet) {
+      btnSaveNet.addEventListener('click', () => {
+        const cfg = {
+          useTurn: !!$('chkUseTurn')?.checked,
+          turnUrl: ($('inpTurnUrl')?.value || '').trim(),
+          turnUser: ($('inpTurnUser')?.value || '').trim(),
+          turnPass: ($('inpTurnPass')?.value || '').trim(),
+          relayOnly: !!$('chkRelayOnly')?.checked,
+        };
+        saveNetConfig(cfg);
+        setTurnTestStatus('TURN 測試：尚未測試');
+        toast('已儲存進階連線設定（請離開/重置後再重新連線）');
+      });
+    }
+    if (btnClearNet) {
+      btnClearNet.addEventListener('click', () => {
+        saveNetConfig({ ...DEFAULT_NET_CONFIG });
+        applyNetConfigToUI();
+        setTurnTestStatus('TURN 測試：尚未測試');
+        toast('已恢復預設 TURN（請離開/重置後再重新連線）');
+      });
+    }
+    if (btnTestTurn) {
+      btnTestTurn.addEventListener('click', () => {
+        // Read current UI first so user doesn't have to press save.
+        const cfg = {
+          useTurn: true, // testing TURN implies enable
+          turnUrl: ($('inpTurnUrl')?.value || '').trim(),
+          turnUser: ($('inpTurnUser')?.value || '').trim(),
+          turnPass: ($('inpTurnPass')?.value || '').trim(),
+          relayOnly: true, // force relay for test
+        };
+        testTurnServer(cfg);
+      });
+    }
+
+    $('btnApplyRounds').addEventListener('click', () => {
+      if (!isHost) return;
+      hostApplyRounds();
+    });
+
+    $('inpRounds').addEventListener('change', () => {
+      if (!isHost) return;
+      hostApplyRounds();
+    });
+
+    $('btnStartGame').addEventListener('click', () => startGame());
+
+    $('btnGoLobby').addEventListener('click', () => showPage('lobby'));
+    $('btnBackToLobby').addEventListener('click', () => showPage('lobby'));
+
+    $('btnClearLog').addEventListener('click', () => $('log').innerHTML='');
+    $('btnClearGameLog').addEventListener('click', () => $('gameLog').innerHTML='');
+
+    $('btnResetArrange').addEventListener('click', () => {
+      if (clientState.submitted) return toast('已提交，無法重排');
+      resetArrange();
+    });
+    $('btnAutoFill').addEventListener('click', () => autoFillRandomNoFoul());
+    $('btnSubmit').addEventListener('click', () => submitArrangement());
+
+    $('btnReveal').addEventListener('click', () => {
+      if (!isHost) return;
+      revealRound();
+    });
+
+    $('btnNextRound').addEventListener('click', () => {
+      if (!isHost) return;
+      nextRound();
+    });
+
+    $('btnOpenLastReveal').addEventListener('click', () => {
+      if (clientState.lastReveal) openRevealModal(clientState.lastReveal);
+    });
+
+    $('btnCloseReveal').addEventListener('click', closeRevealModal);
+    $('btnCloseReveal2').addEventListener('click', closeRevealModal);
+    $('revealBackdrop').addEventListener('click', closeRevealModal);
+
+    // Bottom bar modals
+    $('btnOpenStatus').addEventListener('click', () => {
+      // In kiosk mode, "狀態/結果" should show the full settlement when available
+      if (clientState.lastReveal) {
+        openRevealModal(clientState.lastReveal);
+      } else {
+        openStatusModal();
+      }
+    });
+    $('btnOpenLog').addEventListener('click', openLogModal);
+    $('btnMidAction').addEventListener('click', () => {
+      // Host: after reveal -> next round. Otherwise: open Arrange (牌組)
+      if (isHost && hostState.revealed) {
+        nextRound();
+      } else {
+        openArrangeModal();
+      }
+    });
+
+    // Chat send
+    $('btnSendChat').addEventListener('click', () => {
+      sendChatText($('inpChat').value);
+      $('inpChat').value = '';
+    });
+    $('inpChat').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendChatText($('inpChat').value);
+        $('inpChat').value = '';
+      }
+    });
+    $('chatQuick').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-msg]');
+      if (!btn) return;
+      const msg = btn.dataset.msg;
+      // quick msg: keep chat record + force danmaku on all players
+      sendChatText(msg);
+      sendDanmakuText(msg);
+    });
+
+    $('btnCloseStatus').addEventListener('click', closeStatusModal);
+    $('statusBackdrop').addEventListener('click', closeStatusModal);
+
+    $('btnCloseReport').addEventListener('click', closeReportModal);
+    $('btnCloseReport2').addEventListener('click', closeReportModal);
+    $('reportBackdrop').addEventListener('click', closeReportModal);
+
+    $('btnCloseLog').addEventListener('click', closeLogModal);
+    $('logBackdrop').addEventListener('click', closeLogModal);
+
+    // Arrange modal events
+    $('btnOpenArrange').addEventListener('click', openArrangeModal);
+    $('btnCloseArrange').addEventListener('click', closeArrangeModal);
+    $('btnCloseArrange2').addEventListener('click', closeArrangeModal);
+    $('arrangeBackdrop').addEventListener('click', closeArrangeModal);
+
+    // Table center hotspot opens Arrange modal
+    $('btnOpenActionMenu')?.addEventListener('click', () => {
+      // If not yet dealt, ignore
+      if (!(clientState.cards9 && clientState.cards9.length)) {
+        toast('尚未開始／未發牌');
+        return;
+      }
+      openArrangeModal();
+    });
+
+    // Dealer pick (pre-reveal) modal events
+    $('btnCloseDealerPickPre').addEventListener('click', closeDealerPickPreModal);
+    $('dealerPickPreBackdrop').addEventListener('click', closeDealerPickPreModal);
+    $('btnDealerPickPreConfirm').addEventListener('click', () => {
+      if (!dealerPickPreCtx) return;
+      if (!dealerPickPreSelectedId) {
+        toast('請先選擇一位玩家');
+        return;
+      }
+
+      // If controller is the host (no clientConn), apply locally.
+      if (isHost && dealerPickPreCtx.controllerId === hostId) {
+        const ids = [hostId, ...Object.keys(hostState.players)];
+        if (!ids.includes(dealerPickPreSelectedId)) {
+          toast('指定的莊家不在房間內');
+          return;
+        }
+        hostState.dealerOverride = dealerPickPreSelectedId;
+        hostState.dealerPick = null;
+        broadcast({t:'dealerPickFinal', round: dealerPickPreCtx.round, dealerId: dealerPickPreSelectedId});
+        toast('已指定莊家，開始結算');
+        closeDealerPickPreModal();
+        revealRound();
+        return;
+      }
+
+      // Controller (player) sends choice to host
+      if (!clientConn || !clientState.connected) {
+        toast('尚未連線到房主');
+        return;
+      }
+      send(clientConn, {
+        t: 'dealerPickChoice',
+        pick: {
+          round: dealerPickPreCtx.round,
+          kind: dealerPickPreCtx.kind,
+          dealerId: dealerPickPreSelectedId,
+        }
+      });
+      toast('已送出莊家指定');
+      closeDealerPickPreModal();
+    });
+
+    // Game over modal events
+    $('btnCloseGameOver').addEventListener('click', closeGameOverModal);
+    $('gameOverBackdrop').addEventListener('click', closeGameOverModal);
+
+    $('btnExitRoom').addEventListener('click', () => {
+      closeGameOverModal();
+      resetAll();
+      showPage('lobby');
+    });
+
+    $('btnRestart').addEventListener('click', () => {
+      if (isHost) {
+        // host: restart game immediately
+        hostState.round = 0;
+        hostState.revealed = false;
+        hostState.dealt = {};
+        hostState.submissions = {};
+        hostState.dealerId = null;
+        hostState.cumulative = {};
+
+        clientState.cumulative = {};
+        updateMyCumulative();
+
+        const payload = { t:'restart', cumulative: hostState.cumulative };
+        broadcast(payload);
+        closeRevealModal();
+        closeGameOverModal();
+        glog('房主已重開遊戲');
+        nextRound();
+      } else {
+        // player: request host
+        if (!clientConn || !clientState.connected) {
+          toast('尚未連線到房主');
+          return;
+        }
+        send(clientConn, {t:'restartRequest'});
+        toast('已向房主提出再來一局請求');
+      }
+    });
+
+    // -------------------- Boot --------------------
+    // Prevent pinch-to-zoom (best effort)
+    document.addEventListener('gesturestart', (e) => { e.preventDefault(); });
+    document.addEventListener('gesturechange', (e) => { e.preventDefault(); });
+    document.addEventListener('gestureend', (e) => { e.preventDefault(); });
+    document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches && e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
+    (function init() {
+      applyNetConfigToUI();
+      setTurnTestStatus('TURN 測試：尚未測試');
+      const saved = localStorage.getItem('ninePokerName');
+      if (saved) {
+        clientState.myName = saved;
+        $('inpName').value = saved;
+      } else {
+        $('inpName').value = clientState.myName;
+      }
+
+      const url = new URL(location.href);
+      const room = url.searchParams.get('room');
+      if (room) {
+        $('inpRoomId').value = room;
+      }
+
+      setRoleBadges();
+      renderPlayers();
+      showPage('lobby');
+      log('開啟頁面完成。可建立房間或加入房間。');
+
+      // Auto-join from share link
+      if (room) {
+        // joinRoom will reset if needed
+        joinRoom(room);
+      }
+
+      const hostButtonsWatcher = setInterval(() => {
+        if (isHost && peer && myId) {
+          $('btnApplyRounds').classList.remove('hidden');
+          $('btnStartGame').classList.remove('hidden');
+          clearInterval(hostButtonsWatcher);
+        }
+      }, 200);
+    })();
+  </script>
+</body>
+</html>
