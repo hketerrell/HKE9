@@ -445,7 +445,7 @@
   </div>
 
   <!-- Danmaku overlay -->
-  <div id="danmaku" class="fixed inset-0 pointer-events-none z-[60] hidden"></div>
+  <div id="danmaku" class="fixed inset-0 pointer-events-none z-[51] hidden"></div>
 
   <!-- Confetti canvas (game over) -->
   <canvas id="confetti" class="confetti hidden"></canvas>
@@ -926,11 +926,17 @@
       const bottomBar = $('bottomBar');
       if (bottomBar) bottomBar.classList.toggle('hidden', arrangeOpen);
 
-      // Danmaku should only show on the table (game page) and only when no modal is open.
+      // Danmaku should only show on the table (game page).
+      // Allow showing during Chat (logModal), but hide during other modals to avoid blocking operations.
       const dan = $('danmaku');
       if (dan) {
         const inGame = !$('pageGame').classList.contains('hidden');
-        const show = inGame && !anyOpen;
+        const blockIds = ['revealModal','gameOverModal','statusModal','reportModal','dealerPickPreModal','arrangeModal'];
+        const blockingOpen = blockIds.some(id => {
+          const n = $(id);
+          return n && !n.classList.contains('hidden');
+        });
+        const show = inGame && !blockingOpen; // chat modal is allowed
         if (!show) {
           dan.innerHTML = '';
           dan.classList.add('hidden');
@@ -1349,14 +1355,15 @@
       const root = $('danmaku');
       if (!root) return;
 
-      // Danmaku only on table view (pageGame) and not during any modal.
+      // Danmaku only on table view (pageGame).
+      // Allow showing during Chat (logModal), but block during other modals.
       const inGame = !$('pageGame').classList.contains('hidden');
-      const ids = ['revealModal','gameOverModal','statusModal','reportModal','logModal','dealerPickPreModal','arrangeModal'];
-      const anyOpen = ids.some(id => {
+      const blockIds = ['revealModal','gameOverModal','statusModal','reportModal','dealerPickPreModal','arrangeModal'];
+      const blockingOpen = blockIds.some(id => {
         const n = $(id);
         return n && !n.classList.contains('hidden');
       });
-      if (!inGame || anyOpen) return;
+      if (!inGame || blockingOpen) return;
 
       root.classList.remove('hidden');
 
@@ -2191,6 +2198,7 @@
     // Client state
     const clientState = {
       myName: '玩家',
+      hostName: '房主',
       roomId: null,
       connected: false,
       joining: false,
@@ -2660,7 +2668,7 @@
 
     function broadcastPlayers() {
       const list = Object.values(hostState.players).map(p => ({id:p.id, name:p.name}));
-      broadcast({t:'players', list, hostId});
+      broadcast({t:'players', list, hostId, hostName: clientState.myName || '房主'});
     }
 
     function handleMessage(conn, msg) {
@@ -2688,7 +2696,7 @@
         const name = String(msg.name || '玩家').slice(0,20);
         hostState.players[pid] = { id: pid, name, conn, joinedAt: Date.now() };
         renderPlayers();
-        send(conn, {t:'welcome', hostId, settings: hostState.settings, me: {id: pid}, cumulative: hostState.cumulative});
+        send(conn, {t:'welcome', hostId, hostName: (clientState.myName || '房主'), settings: hostState.settings, me: {id: pid}, cumulative: hostState.cumulative});
         broadcastPlayers();
         broadcast({t:'settings', settings: hostState.settings});
         log(`玩家加入：${name} (${pid})`);
@@ -2855,11 +2863,13 @@
     function handleAsClient(conn, msg) {
       if (msg.t === 'welcome') {
         hostId = msg.hostId;
+        clientState.hostName = String(msg.hostName || '房主');
         clientState.settings = msg.settings || clientState.settings;
         clientState.cumulative = msg.cumulative || clientState.cumulative || {};
         $('inpRounds').value = clientState.settings.roundsTotal;
         setRoleBadges();
         renderPlayers();
+        try { showPage('game'); renderTableSeats(); } catch {}
         updateMyCumulative();
         log(`加入成功。房主：${hostId}`);
         return;
@@ -2869,7 +2879,9 @@
         clientState.players = {};
         for (const p of (msg.list||[])) clientState.players[p.id] = p;
         hostId = msg.hostId || hostId;
+        if (msg.hostName) clientState.hostName = String(msg.hostName || '房主');
         renderPlayers();
+        try { renderTableSeats(); } catch {}
         return;
       }
 
@@ -3717,7 +3729,7 @@
         for (const pid of ids) out.push({id: pid, name: hostState.players[pid].name, isHost:false});
         return out;
       }
-      const out = [{id: hostId, name:'房主', isHost:true}];
+      const out = [{id: hostId, name: clientState.hostName || '房主', isHost:true}];
       const ids = Object.keys(clientState.players || {}).sort();
       for (const pid of ids) out.push({id: pid, name: clientState.players[pid].name, isHost:false});
       return out;
@@ -4672,6 +4684,8 @@
           updateMyCumulative();
           setBadge(true, '房間已建立');
           log('房間已建立，等待玩家加入');
+          // show table immediately (waiting room)
+          try { showPage('game'); renderTableSeats(); } catch {}
         }
       }, 80);
     }
@@ -4987,9 +5001,14 @@
 
     // Table center hotspot opens Arrange modal
     $('btnOpenActionMenu')?.addEventListener('click', () => {
-      // If not yet dealt, ignore
-      if (!(clientState.cards9 && clientState.cards9.length)) {
-        toast('尚未開始／未發牌');
+      // Waiting room: allow host to start from center button
+      const hasDealt = (clientState.cards9 && clientState.cards9.length);
+      if (!hasDealt) {
+        if (isHost) {
+          startGame();
+        } else {
+          toast('等待房主開始遊戲');
+        }
         return;
       }
       openArrangeModal();
