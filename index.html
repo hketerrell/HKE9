@@ -1127,8 +1127,7 @@
 
       // Load stickers on-demand (GitHub API may rate-limit; retry when opening)
       try {
-        const root = $('chatStickers');
-        if (root && root.childElementCount === 0) initStickers();
+        initStickers(false);
       } catch {}
 
       try { $('inpChat').focus(); } catch {}
@@ -1193,50 +1192,139 @@
       }
     }
 
-    async function initStickers() {
+    // Sticker loader: GitHub API may be rate-limited; add timeout + cache fallback.
+    let stickersInitPromise = null;
+
+    async function initStickers(force=false) {
+      if (stickersInitPromise && !force) return stickersInitPromise;
+
       const root = $('chatStickers');
       const status = $('stickerStatus');
       if (!root || !status) return;
 
-      root.innerHTML = '';
-      status.textContent = '載入中…';
-
-      try {
-        const api = 'https://api.github.com/repos/hketerrell/HKE9/contents/sticker?ref=main';
-        const res = await fetch(api, {cache:'no-store'});
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const list = await res.json();
-        const files = (Array.isArray(list) ? list : [])
-          .filter(x => {
-            if (!x || x.type !== 'file' || !x.download_url) return false;
-            const n = String(x.name || '').toLowerCase();
-            return n.endsWith('.png') || n.endsWith('.webp');
-          })
-          .sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
-
-        if (!files.length) {
-          status.textContent = '未找到 sticker';
-          return;
-        }
-
-        status.textContent = `Sticker：${files.length} 個`;
-        for (const f of files) {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 p-1 active:scale-[0.99] transition';
-          const img = document.createElement('img');
-          img.src = f.download_url;
-          img.alt = f.name;
-          img.loading = 'lazy';
-          img.className = 'w-full h-auto';
-          btn.appendChild(img);
-          btn.addEventListener('click', () => sendChatSticker(f.download_url));
-          root.appendChild(btn);
-        }
-      } catch (e) {
-        status.textContent = 'Sticker 載入失敗';
-        log('Sticker load error: ' + (e?.message || e));
+      // Allow tapping status to retry
+      if (!status.__retryBound) {
+        status.__retryBound = true;
+        status.style.cursor = 'pointer';
+        status.title = '點擊重試載入 Sticker';
+        status.addEventListener('click', () => initStickers(true));
       }
+
+      const load = async () => {
+        root.innerHTML = '';
+        status.textContent = '載入中…（點擊可重試）';
+
+        const api = 'https://api.github.com/repos/hketerrell/HKE9/contents/sticker?ref=main';
+
+        const fetchJsonWithTimeout = async (url, ms=10000) => {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort('timeout'), ms);
+          try {
+            const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+            const text = await res.text();
+            let json = null;
+            try { json = JSON.parse(text); } catch { json = null; }
+            return { ok: res.ok, status: res.status, json, text };
+          } finally {
+            clearTimeout(t);
+          }
+        };
+
+        const fromCache = () => {
+          try {
+            const raw = localStorage.getItem('ninePokerStickersCache');
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed) || parsed.length === 0) return null;
+            return parsed;
+          } catch {
+            return null;
+          }
+        };
+
+        const renderFiles = (files, label='Sticker') => {
+          const safe = (Array.isArray(files) ? files : [])
+            .filter(x => x && x.url)
+            .map(x => ({ name: String(x.name||''), url: String(x.url||'') }))
+            .filter(x => x.url);
+
+          if (!safe.length) {
+            status.textContent = '未找到 sticker';
+            return;
+          }
+
+          status.textContent = `${label}：${safe.length} 個（點擊可重試）`;
+
+          for (const f of safe) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 p-1 active:scale-[0.99] transition';
+            const img = document.createElement('img');
+            img.src = f.url;
+            img.alt = f.name;
+            img.loading = 'lazy';
+            img.className = 'w-full h-auto';
+            btn.appendChild(img);
+            btn.addEventListener('click', () => sendChatSticker(f.url));
+            root.appendChild(btn);
+          }
+        };
+
+        try {
+          const res = await fetchJsonWithTimeout(api, 10000);
+
+          // Rate limit / forbidden
+          if (!res.ok) {
+            const msg = (res?.json && (res.json.message || res.json.error)) ? String(res.json.message || res.json.error) : `HTTP ${res.status}`;
+            // fallback to cache
+            const cached = fromCache();
+            if (cached) {
+              renderFiles(cached, 'Sticker（快取）');
+              log('Sticker API failed, fallback to cache: ' + msg);
+              return;
+            }
+            status.textContent = `Sticker 載入失敗（${msg}，點擊重試）`;
+            log('Sticker load error: ' + msg);
+            return;
+          }
+
+          const list = Array.isArray(res.json) ? res.json : [];
+          const files = list
+            .filter(x => {
+              if (!x || x.type !== 'file' || !x.download_url) return false;
+              const n = String(x.name || '').toLowerCase();
+              return n.endsWith('.png') || n.endsWith('.webp');
+            })
+            .sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')))
+            .map(x => ({ name: x.name, url: x.download_url }));
+
+          if (!files.length) {
+            status.textContent = '未找到 sticker（點擊重試）';
+            return;
+          }
+
+          // Cache for later (in case of GitHub API rate limit)
+          try { localStorage.setItem('ninePokerStickersCache', JSON.stringify(files)); } catch {}
+
+          renderFiles(files, 'Sticker');
+        } catch (e) {
+          const msg = (e?.name === 'AbortError') ? '逾時' : (e?.message || String(e));
+          const cached = fromCache();
+          if (cached) {
+            renderFiles(cached, 'Sticker（快取）');
+            log('Sticker load timeout/error, fallback to cache: ' + msg);
+            return;
+          }
+          status.textContent = `Sticker 載入失敗（${msg}，點擊重試）`;
+          log('Sticker load error: ' + msg);
+        }
+      };
+
+      stickersInitPromise = load().finally(() => {
+        stickersInitPromise = null;
+      });
+
+      return stickersInitPromise;
     }
 
     function spawnDanmaku(payload, from='') {
