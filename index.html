@@ -3512,8 +3512,9 @@
         root.appendChild(seat);
 
         // floating reveal area (outside seat, pulled toward table center)
-        const fx = clampPct(50 + (x - 50) * 0.68);
-        const fy = clampPct(50 + (y - 50) * 0.68);
+        // smaller factor => closer to table center
+        const fx = clampPct(50 + (x - 50) * 0.55);
+        const fy = clampPct(50 + (y - 50) * 0.55);
         const float = el('div', 'absolute z-[52] pointer-events-none w-[180px] sm:w-[220px]');
         float.id = 'seatFloat_' + p.id;
         float.style.left = fx + '%';
