@@ -1177,7 +1177,8 @@
         try {
           wrap.innerHTML = '';
           wrap.className = 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/20 border border-white/10 flex items-center justify-center mb-1 mx-auto';
-          wrap.appendChild(el('div','text-[10px] font-black text-amber-100/80', n.slice(0,1) || '?'));
+          const initials = Array.from(n).slice(0,2).join('') || '?';
+          wrap.appendChild(el('div','text-[10px] font-black text-amber-100/80 tracking-tight', initials));
         } catch {}
       });
 
