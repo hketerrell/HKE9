@@ -158,6 +158,13 @@
       background: rgba(250,204,21,.10) !important;
     }
 
+    /* Chat unread indicator for collapsed bar toggle */
+    #btnShowBar.chat-unread {
+      animation: chatBtnPulse 1s ease-in-out infinite;
+      border-color: rgba(250,204,21,.35) !important;
+      background: rgba(250,204,21,.10) !important;
+    }
+
     /* Danmaku */
     @keyframes danmakuFly {
       from { transform: translateX(110vw); }
@@ -434,13 +441,17 @@
       <!-- Bottom action bar (mobile friendly) -->
       <div id="bottomBar" class="fixed bottom-0 left-0 right-0 z-[45]">
         <div class="mx-auto max-w-5xl px-3 pb-3">
-          <div class="rounded-2xl panel border border-white/10 p-2 flex items-center justify-between gap-2">
+          <div class="rounded-2xl panel border border-white/10 p-2 flex items-center gap-2">
             <button id="btnOpenStatus" class="flex-1 text-xs px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">狀態/結果</button>
             <button id="btnMidAction" class="flex-1 text-xs px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">牌組</button>
             <button id="btnOpenLog" class="flex-1 text-xs px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">聊天</button>
+            <button id="btnHideBar" class="shrink-0 w-10 text-xs px-0 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">&gt;</button>
           </div>
         </div>
       </div>
+
+      <!-- Show bottom bar button (hidden by default; only visible when bottom bar is collapsed) -->
+      <button id="btnShowBar" type="button" class="hidden fixed bottom-3 right-3 z-[46] w-11 h-11 rounded-full chip text-amber-100 font-black border border-amber-200/20 bg-black/25 backdrop-blur hover:brightness-110 active:scale-[0.99]">&lt;</button>
     </main>
   </div>
 
@@ -876,6 +887,120 @@
         : 'text-amber-100 border-amber-300/25 bg-amber-300/10');
     };
 
+    // -------------------- Player icon (by name) --------------------
+    // Preferred icon source: Google Drive folder
+    // Folder: https://drive.google.com/drive/folders/1wXFqri-r7MjatMM8qwaQWCY3zGsFUiKx
+    // IMPORTANT: Google Drive cannot be accessed by filename path directly (no /<name>.png URLs).
+    // To load <name>.png from a Drive folder, we must resolve the fileId via Google Drive API.
+    // This app supports:
+    // - Drive API resolve (if you provide DRIVE_API_KEY)
+    // - Fallback to GitHub/jsDelivr (so icons still work without a key)
+
+    const DRIVE_FOLDER_ID = '1wXFqri-r7MjatMM8qwaQWCY3zGsFUiKx';
+    const DRIVE_API_KEY = ''; // optional: put your Google API key here to enable Drive lookup
+
+    const ICON_FALLBACK_BASE = 'https://cdn.jsdelivr.net/gh/hketerrell/HKE9@main/icon/';
+
+    const iconCache = new Map(); // name -> 'ok' | 'fail'
+    let driveIconIndex = null; // name -> fileId
+
+    function loadDriveIconIndex() {
+      if (driveIconIndex) return driveIconIndex;
+      try {
+        const raw = localStorage.getItem('ninePokerDriveIconIndex');
+        driveIconIndex = raw ? (JSON.parse(raw) || {}) : {};
+      } catch {
+        driveIconIndex = {};
+      }
+      return driveIconIndex;
+    }
+
+    function saveDriveIconIndex() {
+      try { localStorage.setItem('ninePokerDriveIconIndex', JSON.stringify(driveIconIndex || {})); } catch {}
+    }
+
+    function driveIconUrl(fileId) {
+      return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+    }
+
+    async function resolveDriveFileIdByName(name) {
+      const n = String(name || '').trim();
+      if (!n) return null;
+      if (!DRIVE_API_KEY) return null;
+
+      const idx = loadDriveIconIndex();
+      if (idx[n]) return idx[n];
+
+      const q = `'${DRIVE_FOLDER_ID}' in parents and trashed=false and name='${n}.png'`;
+      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent('files(id,name)')}&key=${encodeURIComponent(DRIVE_API_KEY)}`;
+
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const json = await res.json();
+      const id = json?.files?.[0]?.id || null;
+      if (id) {
+        idx[n] = id;
+        driveIconIndex = idx;
+        saveDriveIconIndex();
+      }
+      return id;
+    }
+
+    function iconUrlForName(name) {
+      const n = String(name || '').trim();
+      if (!n) return '';
+      const idx = loadDriveIconIndex();
+      if (idx[n]) return driveIconUrl(idx[n]);
+      // fallback (used when no Drive API key / not resolved yet)
+      return ICON_FALLBACK_BASE + encodeURIComponent(n) + '.png';
+    }
+
+    function createPlayerIconNode(name) {
+      const n = String(name || '').trim();
+      if (!n) return null;
+      const st = iconCache.get(n);
+      if (st === 'fail') return null;
+
+      const wrap = el('div', 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/20 border border-white/10 flex items-center justify-center overflow-hidden mb-1 mx-auto');
+      const img = document.createElement('img');
+      img.alt = n;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.referrerPolicy = 'no-referrer';
+      img.src = iconUrlForName(n);
+      img.className = 'w-full h-full object-contain p-1';
+
+      img.addEventListener('load', () => {
+        iconCache.set(n, 'ok');
+      }, { once: true });
+
+      img.addEventListener('error', () => {
+        // If it failed while using fallback, keep as fail (avoid endless retries)
+        iconCache.set(n, 'fail');
+        try { wrap.remove(); } catch {}
+      }, { once: true });
+
+      wrap.appendChild(img);
+
+      // Best-effort: resolve Google Drive fileId and switch src (if API key is provided)
+      try {
+        const idx = loadDriveIconIndex();
+        if (!idx[n] && DRIVE_API_KEY) {
+          resolveDriveFileIdByName(n).then((id) => {
+            if (!id) return;
+            if (!wrap.isConnected) return;
+            // If image already loaded from fallback, keep it; otherwise switch to Drive.
+            // (Drive is preferred, but fallback CDN may be faster.)
+            if (iconCache.get(n) !== 'ok') {
+              img.src = driveIconUrl(id);
+            }
+          }).catch(() => {});
+        }
+      } catch {}
+
+      return wrap;
+    }
+
     function showPage(which) {
       const lobby = $('pageLobby');
       const game = $('pageGame');
@@ -924,7 +1049,18 @@
       }
 
       const bottomBar = $('bottomBar');
-      if (bottomBar) bottomBar.classList.toggle('hidden', arrangeOpen);
+      const btnShowBar = $('btnShowBar');
+      const btnHideBar = $('btnHideBar');
+
+      // Bottom bar behavior:
+      // - Always hide while arranging (to maximize space)
+      // - Otherwise, show/hide based on user toggle (clientState.bottomBarCollapsed)
+      const forceHideBar = arrangeOpen;
+      const collapsed = !!clientState.bottomBarCollapsed;
+
+      if (bottomBar) bottomBar.classList.toggle('hidden', forceHideBar || collapsed);
+      if (btnShowBar) btnShowBar.classList.toggle('hidden', forceHideBar || !collapsed);
+      if (btnHideBar) btnHideBar.disabled = false;
 
       // Danmaku should only show on the table (game page).
       // Allow showing during Chat (logModal), but hide during other modals to avoid blocking operations.
@@ -1129,10 +1265,16 @@
     }
 
     function updateChatUnread() {
-      const btn = $('btnOpenLog');
-      if (!btn) return;
+      const btnChat = $('btnOpenLog');
+      const btnShow = $('btnShowBar');
       const open = !$('logModal').classList.contains('hidden');
-      btn.classList.toggle('chat-unread', !!clientState.chatUnread && !open);
+      const unread = !!clientState.chatUnread && !open;
+
+      const bottomBar = $('bottomBar');
+      const barHidden = !bottomBar || bottomBar.classList.contains('hidden');
+
+      if (btnChat) btnChat.classList.toggle('chat-unread', unread && !barHidden);
+      if (btnShow) btnShow.classList.toggle('chat-unread', unread && barHidden);
     }
 
     function openLogModal() {
@@ -2218,6 +2360,7 @@
       cumulative: {},
       pendingGameOver: null, // set when final round revealed; show after closing reveal modal
       chatUnread: false,
+      bottomBarCollapsed: true,
     };
 
     function setRoleBadges() {
@@ -2265,6 +2408,7 @@
       clientState.submitted = false;
       clientState.lastReveal = null;
       clientState.cumulative = {};
+      clientState.bottomBarCollapsed = true;
 
       hostState.settings = { roundsTotal: 5 };
       hostState.players = {};
@@ -2292,6 +2436,8 @@
       renderReadyList();
       renderScores(null);
       closeRevealModal();
+      updateBodyOverflow();
+      updateChatUnread();
       log('已重置');
     }
 
@@ -3677,9 +3823,14 @@
         seat.style.top = y + '%';
 
         const badge = el('div', 'rounded-2xl bg-black/25 border border-white/10 px-2.5 py-2 w-[104px] sm:w-[126px] overflow-hidden');
-        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate', p.name + (p.isHost ? '（房主）' : ''));
+
+        // player icon (by name)
+        const iconNode = createPlayerIconNode(p.name);
+        if (iconNode) badge.appendChild(iconNode);
+
+        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate text-center', p.name + (p.isHost ? '（房主）' : ''));
         badge.appendChild(nameLine);
-        badge.appendChild(el('div','text-[10px] text-emerald-100/70 mt-1', '已入座'));
+        badge.appendChild(el('div','text-[10px] text-emerald-100/70 mt-1 text-center', '已入座'));
 
         seat.appendChild(badge);
         root.appendChild(seat);
@@ -3809,8 +3960,16 @@
         badge.dataset.pid = p.id;
         badge.id = 'seatBadge_' + p.id;
 
+        // player icon (by name)
+        const iconNode = createPlayerIconNode(p.name);
+        if (iconNode) {
+          iconNode.classList.remove('mx-auto');
+          iconNode.classList.add('mx-auto');
+          badge.appendChild(iconNode);
+        }
+
         // Seat name line (dealer crown will be added during reveal)
-        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate', p.name + (p.isHost ? '（房主）' : ''));
+        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate text-center', p.name + (p.isHost ? '（房主）' : ''));
         nameLine.id = 'seatName_' + p.id;
         badge.appendChild(nameLine);
 
@@ -4993,6 +5152,17 @@
       }
     });
 
+    // Bottom bar collapse/expand
+    function setBottomBarCollapsed(v) {
+      clientState.bottomBarCollapsed = !!v;
+      try { localStorage.setItem('ninePokerBottomBarCollapsed', clientState.bottomBarCollapsed ? '1' : '0'); } catch {}
+      updateBodyOverflow();
+      updateChatUnread();
+    }
+
+    $('btnHideBar')?.addEventListener('click', () => setBottomBarCollapsed(true));
+    $('btnShowBar')?.addEventListener('click', () => setBottomBarCollapsed(false));
+
     // Chat send
     $('btnSendChat').addEventListener('click', () => {
       sendChatText($('inpChat').value);
@@ -5146,9 +5316,18 @@
         $('inpRoomId').value = room;
       }
 
+      // Load bottom bar collapsed state (default: collapsed)
+      try {
+        const v = localStorage.getItem('ninePokerBottomBarCollapsed');
+        if (v === '0') clientState.bottomBarCollapsed = false;
+        if (v === '1') clientState.bottomBarCollapsed = true;
+      } catch {}
+
       setRoleBadges();
       renderPlayers();
       showPage('lobby');
+      updateBodyOverflow();
+      updateChatUnread();
       log('開啟頁面完成。可建立房間或加入房間。');
 
       // Init stickers for chat
