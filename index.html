@@ -656,6 +656,12 @@
             <div id="chatStickers" class="mt-2 grid grid-cols-5 sm:grid-cols-6 gap-2"></div>
           </section>
 
+          <details class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <summary class="cursor-pointer select-none text-xs text-emerald-100/70">DEBUG（Drive Icon Lookup）</summary>
+            <div class="mt-2 text-[10px] text-emerald-100/60">只顯示本機 icon 查詢/載入狀態，不會廣播。</div>
+            <div id="chatDebug" class="mt-2 text-[11px] text-emerald-100/70 space-y-1 max-h-32 overflow-auto pr-1"></div>
+          </details>
+
           <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
             <div class="text-xs text-emerald-100/70">輸入</div>
             <div class="mt-2 flex items-center gap-2">
@@ -846,6 +852,14 @@
       const line = el('div', 'text-emerald-50/80', `[${nowTime()}] ${msg}`);
       $('log').prepend(line);
     };
+
+    // Debug log (local-only) shown inside Chat modal
+    const dlog = (msg) => {
+      const box = $('chatDebug');
+      if (!box) return;
+      const line = el('div', 'text-emerald-100/70', `[${nowTime()}] ${msg}`);
+      box.prepend(line);
+    };
     // Chat log: only keep real chat messages (system/game info should not be here)
     const glog = (msg, opts={}) => {
       if (!opts?.chat) return; // hide game/system info in chat
@@ -903,6 +917,7 @@
 
     const iconCache = new Map(); // name -> 'ok' | 'fail'
     let driveIconIndex = null; // name -> fileId
+    const driveDbgSeen = new Set(); // name -> logged
 
     function loadDriveIconIndex() {
       if (driveIconIndex) return driveIconIndex;
@@ -919,33 +934,103 @@
       try { localStorage.setItem('ninePokerDriveIconIndex', JSON.stringify(driveIconIndex || {})); } catch {}
     }
 
+    function driveIconUrls(fileId) {
+      const id = encodeURIComponent(fileId);
+      // Try multiple public patterns. Different Drive setups may allow different endpoints.
+      // Note: some endpoints may redirect or require cookies; we try several and only use one that truly loads.
+      return [
+        // Modern googleusercontent patterns
+        `https://lh3.googleusercontent.com/d/${id}=w200-h200`,
+        `https://lh3.googleusercontent.com/u/0/d/${id}=w200-h200`,
+        // Thumbnail endpoint (often works even when uc fails)
+        `https://drive.google.com/thumbnail?id=${id}&sz=w200`,
+        // Legacy uc endpoints
+        `https://drive.google.com/uc?export=view&id=${id}`,
+        `https://drive.google.com/uc?id=${id}`,
+        `https://drive.google.com/uc?export=download&id=${id}`,
+      ];
+    }
+
     function driveIconUrl(fileId) {
-      return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+      return driveIconUrls(fileId)[0];
     }
 
     async function resolveDriveFileIdByName(name) {
       const n = String(name || '').trim();
       if (!n) return null;
-      if (!DRIVE_API_KEY) return null;
+      if (!DRIVE_API_KEY) {
+        if (!driveDbgSeen.has(n)) {
+          driveDbgSeen.add(n);
+          dlog(`Drive icon: skipped (no API key) for ${n}`);
+        }
+        return null;
+      }
 
       const idx = loadDriveIconIndex();
-      if (idx[n]) return idx[n];
+      if (idx[n]) {
+        if (!driveDbgSeen.has(n)) {
+          driveDbgSeen.add(n);
+          dlog(`Drive icon: cache hit for ${n} => ${idx[n]}`);
+        }
+        return idx[n];
+      }
+
+      if (!driveDbgSeen.has(n)) {
+        driveDbgSeen.add(n);
+        dlog(`Drive icon: lookup start for ${n}`);
+      }
 
       // Escape single quotes for Drive query
-      const safeName = n.replace(/'/g, "\\'");
-      const q = `'${DRIVE_FOLDER_ID}' in parents and trashed=false and name='${safeName}.png'`;
-      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent('files(id,name)')}&key=${encodeURIComponent(DRIVE_API_KEY)}`;
+      const safeBase = n.replace(/'/g, "\\'");
+      const candidates = [`${safeBase}.png`, `${safeBase}.PNG`, `${safeBase}.Png`];
 
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) return null;
-      const json = await res.json();
-      const id = json?.files?.[0]?.id || null;
-      if (id) {
-        idx[n] = id;
-        driveIconIndex = idx;
-        saveDriveIconIndex();
+      for (const fileName of candidates) {
+        const q = `'${DRIVE_FOLDER_ID}' in parents and trashed=false and name='${fileName}'`;
+        const url = `https://www.googleapis.com/drive/v3/files?` +
+          `q=${encodeURIComponent(q)}` +
+          `&fields=${encodeURIComponent('files(id,name)')}` +
+          `&pageSize=1` +
+          `&supportsAllDrives=true&includeItemsFromAllDrives=true` +
+          `&key=${encodeURIComponent(DRIVE_API_KEY)}`;
+
+        let res;
+        try {
+          res = await fetch(url, { cache: 'no-store' });
+        } catch (e) {
+          dlog(`Drive icon: fetch error for ${n} (${fileName}): ${e?.message || e}`);
+          continue;
+        }
+
+        if (!res.ok) {
+          try {
+            const txt = await res.text();
+            dlog(`Drive icon: lookup failed (${res.status}) for ${n} (${fileName}): ${txt?.slice(0,160)}`);
+          } catch {
+            dlog(`Drive icon: lookup failed (${res.status}) for ${n} (${fileName})`);
+          }
+          continue;
+        }
+
+        let json = null;
+        try {
+          json = await res.json();
+        } catch (e) {
+          dlog(`Drive icon: JSON parse error for ${n} (${fileName})`);
+          continue;
+        }
+
+        const id = json?.files?.[0]?.id || null;
+        if (id) {
+          idx[n] = id;
+          driveIconIndex = idx;
+          saveDriveIconIndex();
+          dlog(`Drive icon: found for ${n} => ${id}`);
+          return id;
+        }
       }
-      return id;
+
+      dlog(`Drive icon: not found for ${n} (no matching png in folder)`);
+      return null;
     }
 
     function iconUrlForName(name) {
@@ -966,48 +1051,56 @@
       img.alt = n;
       img.loading = 'lazy';
       img.decoding = 'async';
-      img.referrerPolicy = 'no-referrer';
+      // Some Google image endpoints may fail with no-referrer on certain browsers.
+      // Use a more compatible policy.
+      img.referrerPolicy = 'origin';
       img.className = 'w-full h-full object-contain p-1';
 
       const idx = loadDriveIconIndex();
-      const driveId = idx[n] || null;
-      let triedDrive = false;
-      let triedFallback = false;
+      const cachedDriveId = idx[n] || null;
 
-      const setFallbackSrc = () => {
-        if (triedFallback) return;
-        triedFallback = true;
-        img.src = ICON_FALLBACK_BASE + encodeURIComponent(n) + '.png';
-      };
-
-      const setDriveSrc = (id) => {
-        if (!id) return;
-        triedDrive = true;
-        img.src = driveIconUrl(id);
-      };
-
-      // First attempt: Drive if we already know fileId; otherwise fallback first.
-      if (driveId) setDriveSrc(driveId);
-      else setFallbackSrc();
-
-      // Watchdog: if Drive image hangs/blocked and doesn't load quickly, fall back.
       let loaded = false;
-      if (driveId) {
-        setTimeout(() => {
+      let mode = cachedDriveId ? 'drive' : 'fallback';
+      let driveTry = { id: cachedDriveId, urls: cachedDriveId ? driveIconUrls(cachedDriveId) : [], i: 0 };
+
+      const fallbackUrl = ICON_FALLBACK_BASE + encodeURIComponent(n) + '.png';
+
+      const setFallback = () => {
+        mode = 'fallback';
+        img.src = fallbackUrl;
+      };
+
+      const tryNextDriveUrl = () => {
+        if (!driveTry?.urls?.length) return false;
+        if (driveTry.i >= driveTry.urls.length) return false;
+        const u = driveTry.urls[driveTry.i++];
+        mode = 'drive';
+        img.src = u;
+        return true;
+      };
+
+      const setDrive = (id) => {
+        if (!id) return;
+        driveTry = { id, urls: driveIconUrls(id), i: 0 };
+        mode = 'drive';
+        tryNextDriveUrl();
+
+        // watchdog: if drive hangs/blocked, try next URL variant before falling back
+        const watchdogOnce = () => {
           if (!wrap.isConnected) return;
           if (loaded) return;
-          if (!triedFallback) setFallbackSrc();
-        }, 1200);
-      }
+          if (mode !== 'drive') return;
 
-      img.addEventListener('load', () => {
-        loaded = true;
-        iconCache.set(n, 'ok');
-      });
+          if (tryNextDriveUrl()) {
+            dlog(`Drive icon: image timeout -> try next URL (${driveTry.i}/${driveTry.urls.length}) => ${n}`);
+            setTimeout(watchdogOnce, 1800);
+            return;
+          }
 
-      img.addEventListener('error', async () => {
-        // If Drive failed, drop cached id and fallback to CDN.
-        if (triedDrive && !triedFallback) {
+          dlog(`Drive icon: image timeout (all URL variants), fallback => ${n}`);
+          dlog(`Drive icon hint: check file permission (Anyone with the link can view) for ${n}.png`);
+
+          // Delete cached id (to avoid repeated failures) and fall back
           try {
             const idx2 = loadDriveIconIndex();
             if (idx2[n]) {
@@ -1016,28 +1109,80 @@
               saveDriveIconIndex();
             }
           } catch {}
-          setFallbackSrc();
+
+          setFallback();
+        };
+
+        setTimeout(watchdogOnce, 1800);
+      };
+
+      // Start with fallback immediately (so we always show something fast),
+      // then upgrade to Drive (preferred) if we can load it.
+      setFallback();
+      if (cachedDriveId) {
+        loaded = false;
+        setDrive(cachedDriveId);
+      }
+
+      img.addEventListener('load', () => {
+        loaded = true;
+        iconCache.set(n, 'ok');
+        if (!img.__dbgLoaded) {
+          img.__dbgLoaded = true;
+          dlog(`Icon loaded (${mode}) => ${n}`);
+        }
+      });
+
+      img.addEventListener('error', async () => {
+        if (mode === 'drive') {
+          // Try next drive URL variant first
+          if (tryNextDriveUrl()) {
+            dlog(`Drive icon: retry next URL (${driveTry.i}/${driveTry.urls.length}) => ${n}`);
+            return;
+          }
+
+          dlog(`Drive icon: image failed (all URL variants), fallback => ${n}`);
+          dlog(`Drive icon hint: check file permission (Anyone with the link can view) for ${n}.png`);
+
+          // Delete cached id (to avoid repeated failures) and fall back
+          try {
+            const idx2 = loadDriveIconIndex();
+            if (idx2[n]) {
+              delete idx2[n];
+              driveIconIndex = idx2;
+              saveDriveIconIndex();
+            }
+          } catch {}
+
+          loaded = false;
+          setFallback();
           return;
         }
 
-        // If fallback failed too, stop showing icon for this name.
+        // fallback failed too
+        dlog(`Icon fallback failed => ${n} (${fallbackUrl})`);
         iconCache.set(n, 'fail');
-        try { wrap.remove(); } catch {}
+        // Keep a minimal text placeholder instead of removing the node,
+        // so the seat layout stays stable.
+        try {
+          wrap.innerHTML = '';
+          wrap.className = 'w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/20 border border-white/10 flex items-center justify-center mb-1 mx-auto';
+          wrap.appendChild(el('div','text-[10px] font-black text-amber-100/80', n.slice(0,1) || '?'));
+        } catch {}
       });
 
       wrap.appendChild(img);
 
-      // Best-effort: resolve Google Drive fileId and try Drive (preferred) if not cached yet.
-      // If Drive is unreachable (permissions / API restrictions), fallback already shows.
-      if (!driveId && DRIVE_API_KEY) {
+      // Best-effort: resolve Google Drive fileId and switch to Drive (preferred)
+      if (!cachedDriveId && DRIVE_API_KEY) {
         resolveDriveFileIdByName(n).then((id) => {
           if (!id) return;
-          // Cache + try switching to Drive only if still connected and not already loaded OK.
           if (!wrap.isConnected) return;
-          if (iconCache.get(n) === 'ok') return;
-          setDriveSrc(id);
-        }).catch(() => {
-          // Ignore; fallback remains.
+          // Upgrade to Drive even if fallback already loaded
+          loaded = false;
+          setDrive(id);
+        }).catch((e) => {
+          dlog(`Drive icon: resolve error for ${n}: ${e?.message || e}`);
         });
       }
 
@@ -1346,6 +1491,24 @@
       // Load stickers on-demand (GitHub API may rate-limit; retry when opening)
       try {
         initStickers(false);
+      } catch {}
+
+      // DEBUG: run a one-shot drive icon resolve for current known names
+      try {
+        if (!$('logModal').__driveDbgRun) {
+          $('logModal').__driveDbgRun = true;
+          const names = new Set();
+          names.add(String(clientState.myName||'').trim());
+          if (clientState.hostName) names.add(String(clientState.hostName||'').trim());
+          if (isHost) {
+            for (const pid in (hostState.players||{})) names.add(String(hostState.players[pid]?.name||'').trim());
+          } else {
+            for (const pid in (clientState.players||{})) names.add(String(clientState.players[pid]?.name||'').trim());
+          }
+          [...names].filter(Boolean).slice(0,12).forEach(n => {
+            resolveDriveFileIdByName(n).catch(()=>{});
+          });
+        }
       } catch {}
 
       // Avoid auto-opening mobile keyboard when entering chat
