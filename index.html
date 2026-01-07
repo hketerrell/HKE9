@@ -699,9 +699,9 @@
 
         <div class="p-1 flex-1 overflow-auto">
           <div class="rounded-xl bg-black/15 border border-white/10 p-1">
-            <div class="grid gap-1">
+            <div class="grid gap-1 justify-items-center">
               <!-- Head + Dealer (dealer on the right) -->
-              <div class="flex items-start gap-[2px]">
+              <div class="flex items-start justify-center gap-[2px]">
                 <div class="min-w-[52px]">
                   <div class="text-[11px] text-emerald-100/80 leading-none">頭（2）</div>
                   <div id="headEval" class="text-[10px] text-emerald-100/70 leading-none">—</div>
@@ -714,7 +714,7 @@
               </div>
 
               <!-- Mid -->
-              <div class="flex items-start gap-[2px]">
+              <div class="flex items-start justify-center gap-[2px]">
                 <div class="min-w-[52px]">
                   <div class="text-[11px] text-emerald-100/80 leading-none">中（3）</div>
                   <div id="midEval" class="text-[10px] text-emerald-100/70 leading-none">—</div>
@@ -723,7 +723,7 @@
               </div>
 
               <!-- Tail -->
-              <div class="flex items-start gap-[2px]">
+              <div class="flex items-start justify-center gap-[2px]">
                 <div class="min-w-[52px]">
                   <div class="text-[11px] text-emerald-100/80 leading-none">尾（3）</div>
                   <div id="tailEval" class="text-[10px] text-emerald-100/70 leading-none">—</div>
@@ -1445,6 +1445,15 @@
 
     function closeArrangeModal() {
       $('arrangeModal').classList.add('hidden');
+      updateBodyOverflow();
+    }
+
+    // When a new hand is dealt, auto-close other modals so Arrange can be used immediately.
+    function closeModalsForNewHand() {
+      const ids = ['revealModal','statusModal','logModal','dealerPickPreModal','gameOverModal','reportModal'];
+      for (const id of ids) {
+        try { $(id)?.classList.add('hidden'); } catch {}
+      }
       updateBodyOverflow();
     }
 
@@ -3281,7 +3290,8 @@
         clientState.cumulative = msg.cumulative || clientState.cumulative || {};
         $('gameRoomId').textContent = clientState.roomId || '—';
         $('gameRoundInfo').textContent = `${clientState.round} / ${clientState.settings.roundsTotal}`;
-        glog(`遊戲開始（共 ${clientState.settings.roundsTotal} 局）`);
+        // chat log hides system messages; use toast instead
+        toast(`遊戲開始（共 ${clientState.settings.roundsTotal} 局）`);
         updateMyCumulative();
         try { renderTableSeats(); } catch {}
         return;
@@ -3305,12 +3315,18 @@
         $('scoreBody').innerHTML = '';
         $('btnOpenLastReveal').classList.add('hidden');
 
+        // Auto open Arrange when a new hand is dealt
+        closeModalsForNewHand();
+
         renderGameHeader();
         renderHand();
         renderSlots();
         renderReadyList(msg.ready || null);
         try { renderTableSeats(); } catch {}
-        glog(`第 ${clientState.round} 局：收到發牌（請先選莊牌）`);
+
+        // Let players know a new round started, then open Arrange
+        toast(`第 ${clientState.round} 局已開始，請排牌`);
+        openArrangeModal();
         return;
       }
 
@@ -3628,6 +3644,11 @@
       renderSlots();
       renderReadyList(ready);
       updateMyCumulative();
+
+      // Host: auto open Arrange on each new round
+      closeModalsForNewHand();
+      toast(`第 ${hostState.round} 局已開始，請排牌`);
+      openArrangeModal();
     }
 
     function computeDealerIdFromSubmissions() {
@@ -3694,24 +3715,8 @@
         }
       }
 
-      // 決定莊家：
-      // - 若有人擺烏龍：擺烏龍者自動當莊（多名則用選莊牌最大者；再以 id tie-break）
-      // - 否則：照常用結算前指定或比選莊牌
-      let dealerId = null;
-      if (wulongSet.size > 0) {
-        const cands = [...wulongSet];
-        cands.sort((a,b) => {
-          const ca = hostState.submissions[a]?.dealerCard;
-          const cb = hostState.submissions[b]?.dealerCard;
-          const cmp = compareSelectCard(ca, cb);
-          if (cmp !== 0) return -cmp; // larger first
-          return String(a) < String(b) ? -1 : 1;
-        });
-        dealerId = cands[0];
-      } else {
-        dealerId = hostState.dealerOverride || computeDealerIdFromSubmissions();
-      }
-
+      // 決定莊家：照常用結算前指定或比選莊牌（擺烏龍不再強制當莊）
+      let dealerId = hostState.dealerOverride || computeDealerIdFromSubmissions();
       hostState.dealerOverride = null;
       if (!dealerId) {
         toast('無法決定莊家（資料不足）');
@@ -3923,35 +3928,12 @@
 
         const wulongDealer = wulongSet.has(dealerId);
 
-        // 擺烏龍局：擺烏龍者自動當莊，且「擺烏龍莊」本局三墩全輸。
-        // - 其他擺烏龍玩家：對莊家三墩全輸（固定 -3）
-        // - 非擺烏龍且未報到成功玩家：自動三墩全勝（依各墩贏分計算）
-        if (wulongDealer && id !== dealerId) {
-          if (wulongSet.has(id)) {
-            // 強制三墩全輸：分數按「莊家該墩牌型」的正常分值計算
-            const per = {
-              head: -headWinPoints(dealerEval.head),
-              mid: -midWinPoints(dealerEval.mid),
-              tail: -tailWinPoints(dealerEval.tail),
-            };
-            const total = per.head + per.mid + per.tail;
+        // 擺烏龍處理（不再強制當莊）：
+        // - 若莊家擺烏龍：莊家本局三墩全輸（扣分按正常規則計算），其他玩家照常與莊家比牌/報到。
+        // - 若閒家擺烏龍：該閒家本局只輸給莊家（三墩全輸，扣分按莊家牌型的正常分值計算）。
 
-            const note = (reportCode !== 'none' && !(sp.ok && sp.bonus > 0))
-              ? '報到不符→擺烏龍（本局三墩全輸）'
-              : '擺烏龍（本局三墩全輸）';
-
-            results[id] = {
-              total,
-              note,
-              per,
-              report: reportCode,
-              evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
-              dealerCard: sub.dealerCard,
-            };
-            dealerNet -= total;
-            continue;
-          }
-
+        // 1) 閒家擺烏龍：只輸給莊家（仍可報到成功優先）
+        if (id !== dealerId && wulongSet.has(id)) {
           // 報到成功仍優先（不比三墩）
           if (reportCode !== 'none' && sp.ok && sp.bonus > 0) {
             const total = sp.bonus;
@@ -3967,16 +3949,21 @@
             continue;
           }
 
-          // 自動三墩全勝（依各墩贏分）
+          // 強制三墩全輸：分數按「莊家該墩牌型」的正常分值計算
           const per = {
-            head: headWinPoints(se.head),
-            mid: midWinPoints(se.mid),
-            tail: tailWinPoints(se.tail),
+            head: -headWinPoints(dealerEval.head),
+            mid: -midWinPoints(dealerEval.mid),
+            tail: -tailWinPoints(dealerEval.tail),
           };
           const total = per.head + per.mid + per.tail;
+
+          const note = (reportCode !== 'none' && !(sp.ok && sp.bonus > 0))
+            ? '報到不符→擺烏龍（本局三墩全輸）'
+            : '擺烏龍（本局三墩全輸）';
+
           results[id] = {
             total,
-            note: '擺烏龍莊：你三墩全勝',
+            note,
             per,
             report: reportCode,
             evalNames: { head: se.head.name, mid: se.mid.name, tail: se.tail.name },
@@ -3985,6 +3972,9 @@
           dealerNet -= total;
           continue;
         }
+
+        // 2) 莊家擺烏龍：莊家全輸（在 dealer net 會呈現），其他玩家照常計算
+        // 不在這裡特判閒家；閒家走正常/報到規則
 
         // 報到有效（閒家）：不與莊對比頭中尾，直接得分＝報到分數（本局只計報到）
         if (id !== dealerId && reportCode !== 'none' && sp.ok && sp.bonus > 0) {
@@ -4007,31 +3997,41 @@
         let noteParts = [];
 
         if (id !== dealerId) {
-          per.head = headSectionScore(se.head, dealerEval.head);
-          per.mid  = midSectionScore(se.mid, dealerEval.mid);
-          per.tail = tailSectionScore(se.tail, dealerEval.tail);
-          total = per.head + per.mid + per.tail;
+          if (wulongDealer) {
+            // 莊家擺烏龍：閒家三墩一律全勝（按自己的牌型分值計算）
+            per.head = headWinPoints(se.head);
+            per.mid  = midWinPoints(se.mid);
+            per.tail = tailWinPoints(se.tail);
+            total = per.head + per.mid + per.tail;
+            // 注意：不要在閒家備註寫入「擺烏龍」字眼，避免 UI 誤判顯示擺烏龍樣式
+            noteParts.push('莊家失誤：三墩全勝');
+          } else {
+            per.head = headSectionScore(se.head, dealerEval.head);
+            per.mid  = midSectionScore(se.mid, dealerEval.mid);
+            per.tail = tailSectionScore(se.tail, dealerEval.tail);
+            total = per.head + per.mid + per.tail;
 
-          if (Math.abs(per.head) !== 0 && (se.head.cat === 1 || dealerEval.head.cat === 1)) {
-            if (per.head > 0 && se.head.cat === 1) noteParts.push(`頭墩對子+${headWinPoints(se.head)}`);
-            if (per.head < 0 && dealerEval.head.cat === 1) noteParts.push(`頭墩對子-${headWinPoints(dealerEval.head)}`);
-          }
-          if (Math.abs(per.mid) !== 0 && (se.mid.cat === 5 || se.mid.cat === 4 || dealerEval.mid.cat === 5 || dealerEval.mid.cat === 4)) {
-            if (per.mid > 0) {
-              if (se.mid.cat === 5) noteParts.push('中墩同花順+10');
-              else if (se.mid.cat === 4) noteParts.push('中墩三條+6');
-            } else {
-              if (dealerEval.mid.cat === 5) noteParts.push('中墩同花順-10');
-              else if (dealerEval.mid.cat === 4) noteParts.push('中墩三條-6');
+            if (Math.abs(per.head) !== 0 && (se.head.cat === 1 || dealerEval.head.cat === 1)) {
+              if (per.head > 0 && se.head.cat === 1) noteParts.push(`頭墩對子+${headWinPoints(se.head)}`);
+              if (per.head < 0 && dealerEval.head.cat === 1) noteParts.push(`頭墩對子-${headWinPoints(dealerEval.head)}`);
             }
-          }
-          if (Math.abs(per.tail) !== 0 && (se.tail.cat === 5 || se.tail.cat === 4 || dealerEval.tail.cat === 5 || dealerEval.tail.cat === 4)) {
-            if (per.tail > 0) {
-              if (se.tail.cat === 5) noteParts.push('尾墩同花順+5');
-              else if (se.tail.cat === 4) noteParts.push('尾墩三條+3');
-            } else {
-              if (dealerEval.tail.cat === 5) noteParts.push('尾墩同花順-5');
-              else if (dealerEval.tail.cat === 4) noteParts.push('尾墩三條-3');
+            if (Math.abs(per.mid) !== 0 && (se.mid.cat === 5 || se.mid.cat === 4 || dealerEval.mid.cat === 5 || dealerEval.mid.cat === 4)) {
+              if (per.mid > 0) {
+                if (se.mid.cat === 5) noteParts.push('中墩同花順+10');
+                else if (se.mid.cat === 4) noteParts.push('中墩三條+6');
+              } else {
+                if (dealerEval.mid.cat === 5) noteParts.push('中墩同花順-10');
+                else if (dealerEval.mid.cat === 4) noteParts.push('中墩三條-6');
+              }
+            }
+            if (Math.abs(per.tail) !== 0 && (se.tail.cat === 5 || se.tail.cat === 4 || dealerEval.tail.cat === 5 || dealerEval.tail.cat === 4)) {
+              if (per.tail > 0) {
+                if (se.tail.cat === 5) noteParts.push('尾墩同花順+5');
+                else if (se.tail.cat === 4) noteParts.push('尾墩三條+3');
+              } else {
+                if (dealerEval.tail.cat === 5) noteParts.push('尾墩同花順-5');
+                else if (dealerEval.tail.cat === 4) noteParts.push('尾墩三條-3');
+              }
             }
           }
         }
@@ -4061,7 +4061,7 @@
       if (dealerId && results[dealerId]) {
         const wulongDealer = wulongSet.has(dealerId);
         results[dealerId].total = dealerNet;
-        const extra = (wulongDealer ? '擺烏龍莊（全輸）' : '莊家淨值');
+        const extra = (wulongDealer ? '擺烏龍（莊家全輸）' : '莊家淨值');
         results[dealerId].note = (results[dealerId].note ? results[dealerId].note + '｜' : '') + extra;
       }
 
@@ -4393,7 +4393,9 @@
         const per = r.per || {head:0,mid:0,tail:0};
 
         const noteStr = String(r.note || '');
-        const isWulong = noteStr.includes('擺烏龍');
+        // Only treat as wulong for display if this player itself is wulong.
+        // (Dealer wulong should not make other players look like wulong)
+        const isWulong = (noteStr.includes('擺烏龍')) && !noteStr.includes('莊家失誤');
         const isReportOnly = (!isWulong) && (r.report && r.report !== 'none') && noteStr.includes('只計報到');
         const reportBonus = isReportOnly ? Number(r.total || 0) : 0;
 
@@ -4641,9 +4643,18 @@
 
     function currentHandCards() {
       const dealerKey = clientState.dealerCard ? cardKey(clientState.dealerCard) : null;
+      const suitOrder = {C:1, D:2, H:3, S:4, J:5};
       return (clientState.cards9 || [])
         .filter(c => cardKey(c) !== dealerKey)
-        .filter(c => !clientState.usedFromHand.has(cardKey(c)));
+        .filter(c => !clientState.usedFromHand.has(cardKey(c)))
+        .slice()
+        .sort((a,b) => {
+          // rank asc, then suit asc (C<D<H<S), jokers last by r (15/16) and suitOrder
+          const ra = (a.s === 'J') ? a.r : a.r;
+          const rb = (b.s === 'J') ? b.r : b.r;
+          if (ra !== rb) return ra - rb;
+          return (suitOrder[a.s]||0) - (suitOrder[b.s]||0);
+        });
     }
 
     function renderDealerCardSlot() {
@@ -4909,7 +4920,7 @@
       $('tailEval').textContent = isAllFilled(t) ? eval3(t).name : '—';
 
       // 不再即時提示擺烏龍（允許提交；結算時才處理）
-      $('foulHint').textContent = '擺烏龍：頭 > 中 或 中 > 尾（允許提交；擺烏龍者會自動當莊並三墩全輸；報到不符亦作擺烏龍）';
+      $('foulHint').textContent = '擺烏龍：頭 > 中 或 中 > 尾（允許提交；閒家擺烏龍則本局只輸給莊家；莊家擺烏龍本局三墩全輸；報到不符亦作擺烏龍）';
       $('foulHint').className = 'text-xs text-emerald-100/70';
     }
 
