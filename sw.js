@@ -23,6 +23,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Allow page to trigger immediate activation on update
+self.addEventListener('message', (event) => {
+  if (event?.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;

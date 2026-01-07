@@ -175,6 +175,15 @@
       background: rgba(250,204,21,.10) !important;
     }
 
+    /* Update available (lobby) */
+    @keyframes updatePulse {
+      0%,100% { transform: translateY(0); filter: brightness(1); box-shadow: 0 0 0 rgba(250,204,21,0); }
+      50% { transform: translateY(-1px); filter: brightness(1.18); box-shadow: 0 0 0 3px rgba(250,204,21,.18), 0 0 18px rgba(250,204,21,.22); }
+    }
+    #btnUpdateApp.update-available {
+      animation: updatePulse 1s ease-in-out infinite;
+    }
+
     /* Danmaku */
     @keyframes danmakuFly {
       from { transform: translateX(110vw); }
@@ -317,7 +326,10 @@
           <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] sm:w-[360px]">
             <div class="rounded-2xl panel border border-amber-200/15 p-3">
               <div class="flex items-center justify-between gap-2">
-                <div class="rounded-full px-3 py-1 chip text-amber-100 text-xs font-black">HKE九張</div>
+                <div class="flex items-center gap-2">
+                  <div class="rounded-full px-3 py-1 chip text-amber-100 text-xs font-black">HKE九張</div>
+                  <button id="btnUpdateApp" type="button" class="hidden text-[11px] px-2.5 py-1.5 rounded-full bg-amber-400/15 border border-amber-200/25 text-amber-100 font-black hover:brightness-110">更新</button>
+                </div>
                 <div class="text-[11px] text-emerald-100/70">房間</div>
               </div>
 
@@ -606,14 +618,9 @@
         <div class="p-4 grid gap-3 max-h-[70vh] overflow-auto">
           <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
             <div class="flex items-center justify-between gap-2">
-              <div class="font-semibold">各玩家選莊牌</div>
-              <div class="text-xs text-emerald-100/70">你可根據每人的選莊牌決定莊家</div>
+              <div class="font-semibold">請選擇莊家</div>
+              <div class="text-xs text-emerald-100/70">同時顯示各玩家選莊牌</div>
             </div>
-            <div id="dealerPickPreCards" class="mt-2 grid gap-2"></div>
-          </section>
-
-          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
-            <div class="font-semibold">請選擇莊家</div>
             <div id="dealerPickPreList" class="mt-2 grid gap-2"></div>
           </section>
         </div>
@@ -850,6 +857,86 @@
      */
 
     // -------------------- UI helpers --------------------
+    // Build/version stamp (used for update check)
+    const APP_BUILD = '2026-01-07-1';
+    let swReg = null;
+    let updateCheckTimer = null;
+
+    function isLobbyVisible() {
+      const lobby = $('pageLobby');
+      return lobby && !lobby.classList.contains('hidden');
+    }
+
+    function setUpdateAvailable(available, info='') {
+      clientState.updateAvailable = !!available;
+      const btn = $('btnUpdateApp');
+      if (!btn) return;
+      const show = !!available && isLobbyVisible();
+      btn.classList.toggle('hidden', !show);
+      btn.classList.toggle('update-available', !!available);
+      btn.title = available ? (info || '有新版本可更新') : '';
+    }
+
+    async function clearAllCachesBestEffort() {
+      try {
+        if (!('caches' in window)) return;
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch {}
+    }
+
+    async function applyAppUpdate() {
+      try { await toast('更新中…'); } catch {}
+
+      // Prefer SW update flow
+      try {
+        if (swReg) {
+          try { await swReg.update(); } catch {}
+          if (swReg.waiting) {
+            try {
+              swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            } catch {}
+            // Reload when new SW takes control
+            return;
+          }
+        }
+      } catch {}
+
+      // Fallback: clear caches and reload
+      await clearAllCachesBestEffort();
+      location.reload();
+    }
+
+    async function checkVersionOnce() {
+      // Lightweight version file check; no-store + bust param bypasses SW cache.
+      try {
+        const res = await fetch('./version.json?bust=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) return;
+        const json = await res.json();
+        const remote = String(json?.build || '').trim();
+        if (remote && remote !== APP_BUILD) {
+          setUpdateAvailable(true, `發現新版本：${remote}`);
+        }
+      } catch {}
+    }
+
+    function startVersionPolling() {
+      if (updateCheckTimer) return;
+      updateCheckTimer = setInterval(() => {
+        if (!isLobbyVisible()) return;
+        if (clientState.updateAvailable) return;
+        checkVersionOnce();
+        try { swReg?.update(); } catch {}
+      }, 30000);
+    }
+
+    function stopVersionPolling() {
+      if (updateCheckTimer) {
+        clearInterval(updateCheckTimer);
+        updateCheckTimer = null;
+      }
+    }
+
     const $ = (id) => document.getElementById(id);
     const el = (tag, cls, txt) => {
       const n = document.createElement(tag);
@@ -1213,6 +1300,9 @@
         game.classList.remove('hidden');
         goLobby.classList.remove('hidden');
       }
+      // update update button visibility
+      try { setUpdateAvailable(!!clientState.updateAvailable); } catch {}
+      if (which === 'lobby') startVersionPolling(); else stopVersionPolling();
       updateBodyOverflow();
     }
 
@@ -1262,10 +1352,11 @@
       if (btnHideBar) btnHideBar.disabled = false;
 
       // Hide table floating reveal panels while any modal is open (avoid blocking modal UI)
+      // IMPORTANT: do not clear innerHTML here, otherwise host may lose the reveal animation
+      // if they settle while a modal (e.g. status) is open.
       if (anyOpen) {
         try {
           document.querySelectorAll('[id^="seatFloat_"]').forEach(n => {
-            n.innerHTML = '';
             n.classList.add('hidden');
           });
         } catch {}
@@ -1921,46 +2012,49 @@
       if (!dealerPickPreCtx) return;
       const ctx = dealerPickPreCtx;
 
-      // Render dealer cards list
-      const cardsRoot = $('dealerPickPreCards');
-      cardsRoot.innerHTML = '';
       const subs = ctx?.submissions || {};
       const players = ctx?.players || [];
+
+      // Combined list: each row shows player + their dealerCard, click to choose dealer
+      const listRoot = $('dealerPickPreList');
+      if (!listRoot) return;
+      listRoot.innerHTML = '';
+
       for (const p of players) {
         const sub = subs[p.id];
-        const row = el('div','flex items-center justify-between gap-2 rounded-xl bg-black/25 border border-white/10 px-3 py-2');
+        const dc = sub?.dealerCard ? cardLabel(sub.dealerCard) : '—';
+
+        const row = el('button','text-left w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 hover:bg-black/25');
+        row.type = 'button';
+
+        const top = el('div','flex items-center justify-between gap-2');
         const left = el('div','min-w-0');
         left.appendChild(el('div','text-sm text-slate-50 truncate', p.name));
         left.appendChild(el('div','text-[10px] text-emerald-100/70 mono truncate', p.id));
-        const right = el('div','text-sm font-black text-amber-100');
-        right.textContent = sub?.dealerCard ? cardLabel(sub.dealerCard) : '—';
-        row.appendChild(left);
-        row.appendChild(right);
-        cardsRoot.appendChild(row);
-      }
 
-      // Render choose dealer list
-      const listRoot = $('dealerPickPreList');
-      listRoot.innerHTML = '';
-      for (const p of players) {
-        const row = el('button','text-left w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 hover:bg-black/25');
-        row.type = 'button';
-        const top = el('div','flex items-center justify-between gap-2');
-        top.appendChild(el('div','text-sm text-slate-50 truncate', p.name));
-        const badge = el('div','text-xs px-2 py-1 rounded-full border');
+        const right = el('div','flex items-center gap-2');
+        const dcBadge = el('div','text-xs font-black text-amber-100 mono', dc);
+
         const selected = dealerPickPreSelectedId === p.id;
-        badge.className = 'text-xs px-2 py-1 rounded-full border ' + (selected
+        const pickBadge = el('div','text-[11px] px-2 py-1 rounded-full border');
+        pickBadge.className = 'text-[11px] px-2 py-1 rounded-full border ' + (selected
           ? 'bg-amber-400/15 border-amber-200/30 text-amber-100'
           : 'bg-white/5 border-white/10 text-emerald-50/70');
-        badge.textContent = selected ? '已選' : '點選';
-        top.appendChild(badge);
+        pickBadge.textContent = selected ? '已選' : '點選';
+
+        right.appendChild(dcBadge);
+        right.appendChild(pickBadge);
+
+        top.appendChild(left);
+        top.appendChild(right);
         row.appendChild(top);
-        row.appendChild(el('div','text-[10px] text-emerald-100/70 mono mt-1 truncate', p.id));
+
         row.addEventListener('click', (e) => {
           e.preventDefault();
           dealerPickPreSelectedId = p.id;
           renderDealerPickPreLists();
         });
+
         listRoot.appendChild(row);
       }
     }
@@ -2511,9 +2605,13 @@
       const eMid = evals?.mid || eval3(mid);
       const eTail = evals?.tail || eval3(tail);
 
+      // 報到：全紅/全黑只以「頭+中+尾」8 張判斷（不含選莊牌），並忽略鬼牌顏色
+      const eightCards = [...(head || []), ...(mid || []), ...(tail || [])].filter(Boolean);
+      const eightNonJ = eightCards.filter(x => x.s !== 'J');
+
       let ok = false;
-      if (c === 'allRed') ok = nonJ.every(x => isRed(x.s));
-      if (c === 'allBlack') ok = nonJ.every(x => isBlack(x.s));
+      if (c === 'allRed') ok = eightNonJ.every(x => isRed(x.s));
+      if (c === 'allBlack') ok = eightNonJ.every(x => isBlack(x.s));
       if (c === 'threeSnake') ok = canBeStraight2(head) && eMid.cat >= 3 && eTail.cat >= 3; // mid/tail are straight or straight flush
       if (c === 'threeStraightFlush') ok = canBeStraight2(head) && canBeFlush2(head) && eMid.cat === 5 && eTail.cat === 5;
       if (c === 'noHand') {
@@ -2562,6 +2660,155 @@
     let hostId = null;
     let myId = null;
 
+    // ---- Keepalive / Reconnect (best effort; iOS may still suspend WebRTC in background) ----
+    const HEARTBEAT_MS = 8000;
+    const HEARTBEAT_TIMEOUT_MS = 30000;
+    let hostHeartbeatTimer = null;
+    let clientHeartbeatTimer = null;
+    let clientReconnectTimer = null;
+    let clientReconnectAttempts = 0;
+
+    function startHostHeartbeat() {
+      if (hostHeartbeatTimer) return;
+      hostHeartbeatTimer = setInterval(() => {
+        if (!isHost) return;
+        const now = Date.now();
+        for (const pid in (hostState.players || {})) {
+          const p = hostState.players[pid];
+          // cleanup long-offline seats
+          if ((!p?.conn || !p.conn.open) && p?.disconnectedAt && (now - p.disconnectedAt > 90000)) {
+            delete hostState.players[pid];
+            delete hostState.dealt[pid];
+            delete hostState.submissions[pid];
+            broadcastPlayers();
+            renderPlayers();
+            renderReadyList();
+            continue;
+          }
+          if (!p?.conn || !p.conn.open) continue;
+          const last = p.lastSeen || p.joinedAt || now;
+          if (now - last > HEARTBEAT_TIMEOUT_MS) {
+            try { p.conn.close(); } catch {}
+            p.disconnectedAt = now;
+            p.conn = null;
+            continue;
+          }
+          try { send(p.conn, {t:'ping'}); } catch {}
+        }
+      }, HEARTBEAT_MS);
+    }
+
+    function stopHostHeartbeat() {
+      if (hostHeartbeatTimer) {
+        clearInterval(hostHeartbeatTimer);
+        hostHeartbeatTimer = null;
+      }
+    }
+
+    function startClientHeartbeat() {
+      if (clientHeartbeatTimer) return;
+      clientState.lastSeenFromHost = Date.now();
+      clientHeartbeatTimer = setInterval(() => {
+        if (isHost) return;
+        if (!clientConn || !clientConn.open) return;
+        const now = Date.now();
+        if (clientState.lastSeenFromHost && (now - clientState.lastSeenFromHost > HEARTBEAT_TIMEOUT_MS)) {
+          try { clientConn.close(); } catch {}
+          scheduleClientReconnect('heartbeat-timeout');
+          return;
+        }
+        try { send(clientConn, {t:'ping'}); } catch {}
+      }, HEARTBEAT_MS);
+    }
+
+    function stopClientHeartbeat() {
+      if (clientHeartbeatTimer) {
+        clearInterval(clientHeartbeatTimer);
+        clientHeartbeatTimer = null;
+      }
+    }
+
+    function tryPeerServerReconnect() {
+      try {
+        if (peer && peer.disconnected && !peer.destroyed) {
+          peer.reconnect();
+          setBadge(false, '重連中…');
+        }
+      } catch {}
+    }
+
+    function scheduleClientReconnect(reason='') {
+      if (isHost) return;
+      if (!clientState.roomId) return;
+      if (clientState.joining) return;
+      if (document.hidden) return; // wait until visible
+
+      if (clientReconnectTimer) return;
+      clientReconnectAttempts = 0;
+
+      const run = () => {
+        if (isHost) return;
+        if (!clientState.roomId) return;
+        if (clientState.connected) { clientReconnectTimer = null; return; }
+
+        clientReconnectAttempts += 1;
+        const max = 6;
+        setBadge(false, `重新連線中…（${clientReconnectAttempts}/${max}）`);
+
+        tryPeerServerReconnect();
+
+        try {
+          if (clientConn) { try { clientConn.close(); } catch {} }
+        } catch {}
+        clientConn = null;
+
+        try {
+          if (!peer || peer.destroyed) {
+            // recreate peer (may get a new id; best effort)
+            createPeerIfNeeded();
+          }
+        } catch {}
+
+        // wait for peer open then connect
+        const wait = setInterval(() => {
+          if (!(peer && myId)) return;
+          clearInterval(wait);
+          try {
+            clientConn = peer.connect(clientState.roomId);
+            wireConn(clientConn, false);
+          } catch (e) {
+            log('reconnect peer.connect failed: ' + (e?.message || e));
+          }
+        }, 120);
+
+        if (clientReconnectAttempts >= max) {
+          clientReconnectTimer = null;
+          toast('重新連線多次失敗，請手動離開後再加入');
+          setBadge(false, '斷線');
+          return;
+        }
+
+        clientReconnectTimer = setTimeout(() => {
+          clientReconnectTimer = null;
+          run();
+        }, 2000 + clientReconnectAttempts * 500);
+      };
+
+      clientReconnectTimer = setTimeout(() => {
+        clientReconnectTimer = null;
+        run();
+      }, 500);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      // coming back to foreground: try to restore peer server & data connection
+      tryPeerServerReconnect();
+      if (!isHost && !clientState.connected && clientState.roomId) {
+        scheduleClientReconnect('resume');
+      }
+    });
+
     // Max players (including host)
     const MAX_PLAYERS_TOTAL = 6;
 
@@ -2603,6 +2850,7 @@
       pendingGameOver: null, // set when final round revealed; show after closing reveal modal
       chatUnread: false,
       bottomBarCollapsed: true,
+      readyMap: {}, // {peerId: boolean} latest ready status from host
     };
 
     function setRoleBadges() {
@@ -2624,6 +2872,17 @@
     }
 
     function resetAll() {
+      // stop keepalive/reconnect timers
+      try { stopHostHeartbeat(); } catch {}
+      try { stopClientHeartbeat(); } catch {}
+      try {
+        if (clientReconnectTimer) {
+          clearTimeout(clientReconnectTimer);
+          clientReconnectTimer = null;
+        }
+      } catch {}
+      clientReconnectAttempts = 0;
+
       if (peer) {
         try { peer.destroy(); } catch {}
       }
@@ -2985,12 +3244,17 @@
       conn.on('open', () => {
         if (isHost && incomingToHost) {
           log(`玩家連線進來：${conn.peer}`);
+          // ensure host heartbeat is running
+          startHostHeartbeat();
         }
         if (!isHost && !incomingToHost) {
           clientState.connected = true;
           clientState.joining = false;
+          clientState.lastSeenFromHost = Date.now();
           setBadge(true, '已連線');
           log(`已連線到房主：${conn.peer}`);
+          // start heartbeat after connected
+          startClientHeartbeat();
           send(conn, {t:'join', name: clientState.myName});
         }
       });
@@ -3008,14 +3272,25 @@
         const type = err?.type || err?.message || String(err);
         if (isHost) {
           log(`Conn error from ${conn.peer}: ${type}`);
+          try {
+            const pid = conn.peer;
+            if (hostState.players?.[pid]) hostState.players[pid].disconnectedAt = Date.now();
+          } catch {}
         } else {
+          const wasConnected = clientState.connected;
           clientState.connected = false;
           clientState.joining = false;
+          stopClientHeartbeat();
           setBadge(false, '連線失敗');
           log(`連線錯誤：${type}`);
-          toast(type.includes('peer-unavailable')
-            ? '房間不存在或房主尚未上線'
-            : ('連線錯誤：' + type + '（可嘗試：離開/重置後再加入；跨網請測試/設定 TURN）'));
+          if (wasConnected) {
+            toast('連線中斷，嘗試自動重連…');
+            scheduleClientReconnect('conn-error');
+          } else {
+            toast(type.includes('peer-unavailable')
+              ? '房間不存在或房主尚未上線'
+              : ('連線錯誤：' + type + '（可嘗試：離開/重置後再加入；跨網請測試/設定 TURN）'));
+          }
         }
       });
 
@@ -3024,21 +3299,26 @@
           const pid = conn.peer;
           if (hostState.players[pid]) {
             log(`玩家離線：${hostState.players[pid].name} (${pid})`);
-            delete hostState.players[pid];
-            delete hostState.dealt[pid];
-            delete hostState.submissions[pid];
+            // do not immediately remove; mark offline to allow quick resume
+            hostState.players[pid].conn = null;
+            hostState.players[pid].disconnectedAt = Date.now();
             broadcastPlayers();
             renderPlayers();
             renderReadyList();
           }
         } else {
           const wasJoining = clientState.joining;
+          const wasConnected = clientState.connected;
           clientState.connected = false;
           clientState.joining = false;
+          stopClientHeartbeat();
           setBadge(false, '已斷線');
           log('與房主連線已關閉');
           if (wasJoining) {
             toast('連線被關閉：可能房主不在線/房號錯誤，或 ICE 無法打通（跨網/NAT 請測試 TURN）');
+          } else if (wasConnected) {
+            toast('連線中斷，嘗試自動重連…');
+            scheduleClientReconnect('conn-close');
           }
         }
       });
@@ -3061,6 +3341,28 @@
 
     function handleMessage(conn, msg) {
       if (!msg || typeof msg !== 'object') return;
+
+      // ---- keepalive ----
+      if (msg.t === 'ping') {
+        try { send(conn, {t:'pong'}); } catch {}
+        if (isHost) {
+          const pid = conn.peer;
+          if (hostState.players?.[pid]) hostState.players[pid].lastSeen = Date.now();
+        } else {
+          clientState.lastSeenFromHost = Date.now();
+        }
+        return;
+      }
+      if (msg.t === 'pong') {
+        if (isHost) {
+          const pid = conn.peer;
+          if (hostState.players?.[pid]) hostState.players[pid].lastSeen = Date.now();
+        } else {
+          clientState.lastSeenFromHost = Date.now();
+        }
+        return;
+      }
+
       if (isHost) {
         handleAsHost(conn, msg);
       } else {
@@ -3082,12 +3384,22 @@
         }
 
         const name = String(msg.name || '玩家').slice(0,20);
-        hostState.players[pid] = { id: pid, name, conn, joinedAt: Date.now() };
+        const existed = hostState.players[pid];
+        hostState.players[pid] = {
+          id: pid,
+          name,
+          conn,
+          joinedAt: existed?.joinedAt || Date.now(),
+          lastSeen: Date.now(),
+          disconnectedAt: null,
+        };
         renderPlayers();
         send(conn, {t:'welcome', hostId, hostName: (clientState.myName || '房主'), settings: hostState.settings, me: {id: pid}, cumulative: hostState.cumulative});
         broadcastPlayers();
         broadcast({t:'settings', settings: hostState.settings});
-        log(`玩家加入：${name} (${pid})`);
+        log(`${existed ? '玩家重連' : '玩家加入'}：${name} (${pid})`);
+        // start heartbeat as soon as we have at least one player
+        startHostHeartbeat();
         return;
       }
 
@@ -3112,7 +3424,11 @@
 
         hostState.submissions[pid] = sub;
         log(`收到提交：${hostState.players[pid]?.name || pid}`);
-        broadcast({t:'ready', ready: readyMapForBroadcast()});
+        const rmap = readyMapForBroadcast();
+        broadcast({t:'ready', ready: rmap});
+        // update host local ready map for seat tick
+        try { clientState.readyMap = rmap; } catch {}
+        try { renderTableSeats(); } catch {}
         renderReadyList();
         updateMidActionButton();
 
@@ -3257,6 +3573,16 @@
         clientState.settings = msg.settings || clientState.settings;
         clientState.cumulative = msg.cumulative || clientState.cumulative || {};
         $('inpRounds').value = clientState.settings.roundsTotal;
+
+        // stop any pending reconnect loop
+        try {
+          if (clientReconnectTimer) {
+            clearTimeout(clientReconnectTimer);
+            clientReconnectTimer = null;
+          }
+        } catch {}
+        clientReconnectAttempts = 0;
+
         setRoleBadges();
         renderPlayers();
         try { showPage('game'); renderTableSeats(); } catch {}
@@ -3300,6 +3626,8 @@
       if (msg.t === 'deal') {
         clientState.round = msg.round;
         updateMidActionButton();
+        // ready map for seat tick
+        try { clientState.readyMap = msg.ready || {}; } catch {}
         clientState.dealerId = null;
         clientState.cards9 = msg.cards9 || [];
         clientState.dealerCard = null;
@@ -3331,6 +3659,8 @@
       }
 
       if (msg.t === 'ready') {
+        try { clientState.readyMap = msg.ready || {}; } catch {}
+        try { renderTableSeats(); } catch {}
         renderReadyList(msg.ready);
         return;
       }
@@ -3363,6 +3693,12 @@
       if (msg.t === 'reveal') {
         clientState.lastReveal = msg;
         updateMidActionButton();
+        try {
+          const rm = {};
+          for (const p of (msg.players||[])) rm[p.id] = !!msg.submissions?.[p.id];
+          clientState.readyMap = rm;
+        } catch {}
+        try { renderTableSeats(); } catch {}
         clientState.dealerId = msg.dealerId;
         clientState.cumulative = msg.cumulative || clientState.cumulative || {};
         renderGameHeader();
@@ -3399,6 +3735,8 @@
         clientState.lastReveal = null;
         updateMidActionButton();
         clientState.dealerId = null;
+        try { clientState.readyMap = {}; } catch {}
+        try { renderTableSeats(); } catch {}
         $('scoreBody').innerHTML = '';
         renderGameHeader();
         $('btnOpenLastReveal').classList.add('hidden');
@@ -3581,6 +3919,9 @@
       hostState.dealerId = null;
       hostState.dealerPick = null;
       hostState.dealerOverride = null;
+      // clear ready map for new round (seat tick)
+      try { clientState.readyMap = readyMapForBroadcast(); } catch {}
+      try { renderTableSeats(); } catch {}
 
       if (hostState.round > hostState.settings.roundsTotal) {
         broadcast({t:'error', message:'遊戲已結束'});
@@ -3672,6 +4013,10 @@
     function revealRound() {
       if (!isHost) return;
       if (hostState.revealed) return;
+
+      // Ensure table reveal is visible for host (avoid being hidden under status modal)
+      try { $('statusModal')?.classList.add('hidden'); } catch {}
+      try { updateBodyOverflow(); } catch {}
 
       const ids = [hostId, ...Object.keys(hostState.players)];
       const missing = ids.filter(id => !hostState.submissions[id]);
@@ -3795,6 +4140,8 @@
           renderGameHeader();
           renderScores(payload);
           updateMyCumulative();
+          // update ready map for seat tick BEFORE rendering (avoid re-render wiping reveal animation)
+          try { clientState.readyMap = readyMapForBroadcast(); } catch {}
           try { renderTableSeats(); playRevealOnTable(payload); } catch {}
           $('btnOpenLastReveal').classList.remove('hidden');
           updateMidActionButton();
@@ -3893,6 +4240,8 @@
         renderGameHeader();
         renderScores(payload);
         updateMyCumulative();
+        // update ready map for seat tick BEFORE rendering (avoid re-render wiping reveal animation)
+        try { clientState.readyMap = readyMapForBroadcast(); } catch {}
         try { renderTableSeats(); playRevealOnTable(payload); } catch {}
         $('btnOpenLastReveal').classList.remove('hidden');
         updateMidActionButton();
@@ -4088,6 +4437,8 @@
       renderGameHeader();
       renderScores(payload);
       updateMyCumulative();
+      // update ready map for seat tick BEFORE rendering (so tick appears and we don't need to re-render after reveal)
+      try { clientState.readyMap = readyMapForBroadcast(); } catch {}
       try { renderTableSeats(); playRevealOnTable(payload); } catch {}
 
       // Do NOT auto-open detailed reveal modal; show it only when user taps "本局結算"
@@ -4294,7 +4645,7 @@
         seat.style.left = x + '%';
         seat.style.top = y + '%';
 
-        const badge = el('button', 'relative text-left rounded-2xl bg-black/25 border border-white/10 px-2.5 py-2 w-[104px] sm:w-[126px] overflow-hidden hover:bg-black/30 active:scale-[0.99] transition');
+        const badge = el('button', 'relative text-left rounded-2xl bg-black/25 border border-white/10 px-2.5 py-2 w-[104px] sm:w-[126px] overflow-visible hover:bg-black/30 active:scale-[0.99] transition');
         badge.type = 'button';
         badge.dataset.pid = p.id;
         badge.id = 'seatBadge_' + p.id;
@@ -4304,6 +4655,21 @@
         if (iconNode) {
           iconNode.classList.remove('mx-auto');
           iconNode.classList.add('mx-auto');
+
+          // Ready tick (submitted)
+          const ready = !!(clientState.readyMap && clientState.readyMap[p.id]);
+          if (ready) {
+            // Put tick on top of the icon and avoid being clipped by overflow
+            try { iconNode.style.overflow = 'visible'; } catch {}
+            iconNode.classList.add('relative');
+
+            const tick = el('div','absolute right-0 bottom-0 w-5 h-5 rounded-full bg-emerald-500/95 border border-emerald-200/50 flex items-center justify-center text-[11px] font-black text-emerald-950 pointer-events-none');
+            tick.style.transform = 'translate(22%, 22%)';
+            tick.style.zIndex = '5';
+            tick.textContent = '✓';
+            iconNode.appendChild(tick);
+          }
+
           badge.appendChild(iconNode);
         }
 
@@ -5133,8 +5499,12 @@
         // auto close arrange modal back to table
         try { closeArrangeModal(); } catch {}
 
-        broadcast({t:'ready', ready: readyMapForBroadcast()});
-        renderReadyList(readyMapForBroadcast());
+        const rmap = readyMapForBroadcast();
+        broadcast({t:'ready', ready: rmap});
+        // update host local ready map for seat tick
+        try { clientState.readyMap = rmap; } catch {}
+        try { renderTableSeats(); } catch {}
+        renderReadyList(rmap);
 
         if (allSubmitted()) {
           const controller = findDealerPickController(hostState.submissions);
@@ -5230,6 +5600,16 @@
     }
 
     function joinRoom(roomId) {
+      // stop previous keepalive/reconnect
+      try { stopClientHeartbeat(); } catch {}
+      try {
+        if (clientReconnectTimer) {
+          clearTimeout(clientReconnectTimer);
+          clientReconnectTimer = null;
+        }
+      } catch {}
+      clientReconnectAttempts = 0;
+
       ensureName();
       let rid = String(roomId || '').trim();
       // remove invisible spaces that may break peer id parsing
@@ -5385,6 +5765,12 @@
       } catch (e) {
         toast(e?.message || '無法產生分享連結');
       }
+    });
+
+    // App update button (lobby)
+    $('btnUpdateApp')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      applyAppUpdate();
     });
 
     // Advanced net config
@@ -5657,7 +6043,31 @@
         const canSw = ('serviceWorker' in navigator) && location.protocol !== 'file:';
         if (canSw) {
           navigator.serviceWorker.register('./sw.js').then((reg) => {
+            swReg = reg;
             dlog('PWA: service worker registered');
+
+            // If there is already a waiting worker, prompt update
+            if (reg.waiting && navigator.serviceWorker.controller) {
+              setUpdateAvailable(true, '有新版本可更新');
+            }
+
+            reg.addEventListener('updatefound', () => {
+              const nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', () => {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  setUpdateAvailable(true, '已下載新版本，點擊更新');
+                }
+              });
+            });
+
+            // When new SW takes control, reload to apply new assets
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              setUpdateAvailable(false);
+              try { clearAllCachesBestEffort(); } catch {}
+              location.reload();
+            });
+
           }).catch((e) => {
             dlog('PWA: service worker register failed: ' + (e?.message || e));
           });
