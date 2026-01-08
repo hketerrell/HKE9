@@ -2825,6 +2825,7 @@
     const hostState = {
       settings: { roundsTotal: 5 },
       players: {}, // peerId -> {id,name,conn,joinedAt}
+      seatOrder: [], // [hostId, ...playerIds] keeps seat positions stable (host-authoritative)
       round: 0,
       dealerId: null,
       dealt: {}, // peerId -> {all9}
@@ -2843,6 +2844,7 @@
       connected: false,
       joining: false,
       players: {},
+      seatOrder: [], // host-provided seat order (keeps positions stable)
       settings: { roundsTotal: 5 },
       round: 0,
       dealerId: null,
@@ -2906,6 +2908,7 @@
       clientState.roomId = null;
       clientState.connected = false;
       clientState.players = {};
+      clientState.seatOrder = [];
       clientState.round = 0;
       clientState.dealerId = null;
       clientState.cards9 = [];
@@ -2922,6 +2925,7 @@
 
       hostState.settings = { roundsTotal: 5 };
       hostState.players = {};
+      hostState.seatOrder = [];
       hostState.round = 0;
       hostState.dealerId = null;
       hostState.dealt = {};
@@ -3174,6 +3178,11 @@
         if (isHost) {
           hostId = id;
           clientState.roomId = id;
+          // init seat order with host at first
+          try {
+            if (!Array.isArray(hostState.seatOrder) || hostState.seatOrder.length === 0) hostState.seatOrder = [id];
+            else if (hostState.seatOrder[0] !== id) hostState.seatOrder = [id, ...hostState.seatOrder.filter(x => x && x !== id)];
+          } catch {}
           setBadge(true, '房間已建立');
         } else {
           // client: do not override badge if we are in the middle of joining
@@ -3345,7 +3354,7 @@
 
     function broadcastPlayers() {
       const list = Object.values(hostState.players).map(p => ({id:p.id, name:p.name}));
-      broadcast({t:'players', list, hostId, hostName: clientState.myName || '房主'});
+      broadcast({t:'players', list, hostId, hostName: clientState.myName || '房主', seatOrder: hostState.seatOrder});
     }
 
     function handleMessage(conn, msg) {
@@ -3393,12 +3402,48 @@
         }
 
         const name = String(msg.name || '玩家').slice(0,20);
-        const existed = hostState.players[pid];
-
-        // Allow re-join anytime, but block NEW players from entering while a round is in progress.
-        // This prevents breaking the current round (they won't have been dealt and would block settlement).
         const roundInProgress = (hostState.round > 0) && !hostState.revealed;
-        if (!existed && roundInProgress) {
+
+        // 1) exact peerId re-join
+        let existed = hostState.players[pid] || null;
+
+        // 2) name-based reconnect: if someone disconnected and comes back with a new peerId but same name,
+        // migrate that seat/state to the new pid.
+        let migratedFromId = null;
+        if (!existed) {
+          const norm = (s) => String(s||'').trim();
+          const targetName = norm(name);
+          const candidates = Object.values(hostState.players || {})
+            .filter(p => p && norm(p.name) === targetName && (!p.conn || !p.conn.open))
+            .sort((a,b) => Number(a.disconnectedAt||0) - Number(b.disconnectedAt||0));
+          if (candidates.length) {
+            migratedFromId = candidates[0].id;
+            // Move state: cumulative/dealt/submissions + seatOrder
+            try {
+              if (hostState.cumulative[migratedFromId] !== undefined) {
+                hostState.cumulative[pid] = hostState.cumulative[migratedFromId];
+                delete hostState.cumulative[migratedFromId];
+              }
+              if (hostState.dealt[migratedFromId]) {
+                hostState.dealt[pid] = hostState.dealt[migratedFromId];
+                delete hostState.dealt[migratedFromId];
+              }
+              if (hostState.submissions[migratedFromId]) {
+                hostState.submissions[pid] = hostState.submissions[migratedFromId];
+                delete hostState.submissions[migratedFromId];
+              }
+              if (hostState.seatOrder && hostState.seatOrder.length) {
+                hostState.seatOrder = hostState.seatOrder.map(x => x === migratedFromId ? pid : x);
+              }
+              delete hostState.players[migratedFromId];
+            } catch {}
+            existed = null;
+            log(`名稱重連：${name} (${migratedFromId} -> ${pid})`);
+          }
+        }
+
+        // Block truly NEW players from entering while a round is in progress.
+        if (!existed && !migratedFromId && roundInProgress) {
           try { send(conn, {t:'error', message:'本局進行中，請下一局前再加入（可等房主按「下一局」後再入座）'}); } catch {}
           try { conn.close(); } catch {}
           log(`拒絕加入（本局進行中）：${pid}`);
@@ -3414,23 +3459,44 @@
           disconnectedAt: null,
         };
 
+        // Maintain seat order (host + join order). Keep host first.
+        try {
+          if (!Array.isArray(hostState.seatOrder) || hostState.seatOrder.length === 0) hostState.seatOrder = [hostId];
+          if (!hostState.seatOrder.includes(pid)) hostState.seatOrder.push(pid);
+          // Always ensure hostId at index 0
+          hostState.seatOrder = [hostId, ...hostState.seatOrder.filter(x => x && x !== hostId)];
+        } catch {}
+
         renderPlayers();
-        send(conn, {t:'welcome', hostId, hostName: (clientState.myName || '房主'), settings: hostState.settings, me: {id: pid}, cumulative: hostState.cumulative});
+        send(conn, {
+          t:'welcome',
+          hostId,
+          hostName: (clientState.myName || '房主'),
+          settings: hostState.settings,
+          me: {id: pid},
+          cumulative: hostState.cumulative,
+          seatOrder: hostState.seatOrder,
+        });
+
+        // broadcast updated player list + seat order
         broadcastPlayers();
         broadcast({t:'settings', settings: hostState.settings});
-        log(`${existed ? '玩家重連' : '玩家加入'}：${name} (${pid})`);
+        broadcast({t:'seatOrder', seatOrder: hostState.seatOrder});
+
+        log(`${(existed || migratedFromId) ? '玩家重連' : '玩家加入'}：${name} (${pid})`);
+
+        // If game already started, send a start snapshot so the client doesn't stay in "請房主開始" state.
+        try {
+          if (hostState.round > 0) {
+            send(conn, {t:'start', round: hostState.round, settings: hostState.settings, cumulative: hostState.cumulative});
+          }
+        } catch {}
 
         // If this is a re-join during an active round, re-send their current hand so they can continue.
         try {
-          if (existed && roundInProgress && hostState.dealt?.[pid]?.all9) {
+          if ((existed || migratedFromId) && roundInProgress && hostState.dealt?.[pid]?.all9) {
             const ready = readyMapForBroadcast();
-            send(conn, {
-              t:'deal',
-              round: hostState.round,
-              cards9: hostState.dealt[pid].all9,
-              ready,
-              resume: true,
-            });
+            send(conn, {t:'deal', round: hostState.round, cards9: hostState.dealt[pid].all9, ready, resume: true});
             send(conn, {t:'ready', ready});
             log(`已補發本局手牌給重連玩家：${name} (${pid})`);
           }
@@ -3438,7 +3504,7 @@
 
         // If game already finished this round but not started next, tell the player to wait.
         try {
-          if (!existed && hostState.round > 0 && hostState.revealed) {
+          if (!roundInProgress && hostState.round > 0 && hostState.revealed && !hostState.dealt?.[pid]) {
             send(conn, {t:'waitNextRound', round: hostState.round});
           }
         } catch {}
@@ -3615,6 +3681,7 @@
       if (msg.t === 'welcome') {
         hostId = msg.hostId;
         clientState.hostName = String(msg.hostName || '房主');
+        if (Array.isArray(msg.seatOrder)) clientState.seatOrder = msg.seatOrder.slice();
         clientState.settings = msg.settings || clientState.settings;
         clientState.cumulative = msg.cumulative || clientState.cumulative || {};
         $('inpRounds').value = clientState.settings.roundsTotal;
@@ -3641,8 +3708,18 @@
         for (const p of (msg.list||[])) clientState.players[p.id] = p;
         hostId = msg.hostId || hostId;
         if (msg.hostName) clientState.hostName = String(msg.hostName || '房主');
+        if (Array.isArray(msg.seatOrder)) clientState.seatOrder = msg.seatOrder.slice();
         renderPlayers();
         try { renderTableSeats(); } catch {}
+        return;
+      }
+
+      if (msg.t === 'seatOrder') {
+        if (Array.isArray(msg.seatOrder)) {
+          clientState.seatOrder = msg.seatOrder.slice();
+          try { renderLobbySeats(); } catch {}
+          try { renderTableSeats(); } catch {}
+        }
         return;
       }
 
@@ -4618,16 +4695,37 @@
 
     // -------------------- Rendering: game --------------------
     function currentPlayersListForTable() {
-      // returns [{id,name,isHost}] with deterministic order across devices
+      // returns [{id,name,isHost}] in a stable seat order
       if (isHost) {
-        const out = [{id: hostId, name: clientState.myName || '房主', isHost:true}];
-        const ids = Object.keys(hostState.players || {}).sort();
-        for (const pid of ids) out.push({id: pid, name: hostState.players[pid].name, isHost:false});
+        const order = (Array.isArray(hostState.seatOrder) && hostState.seatOrder.length)
+          ? hostState.seatOrder.slice()
+          : [hostId, ...Object.keys(hostState.players || {}).sort()];
+
+        const out = [];
+        for (const id of order) {
+          if (!id) continue;
+          if (id === hostId) {
+            out.push({id, name: clientState.myName || '房主', isHost:true});
+          } else if (hostState.players?.[id]) {
+            out.push({id, name: hostState.players[id].name, isHost:false});
+          }
+        }
         return out;
       }
-      const out = [{id: hostId, name: clientState.hostName || '房主', isHost:true}];
-      const ids = Object.keys(clientState.players || {}).sort();
-      for (const pid of ids) out.push({id: pid, name: clientState.players[pid].name, isHost:false});
+
+      const order = (Array.isArray(clientState.seatOrder) && clientState.seatOrder.length)
+        ? clientState.seatOrder.slice()
+        : [hostId, ...Object.keys(clientState.players || {}).sort()];
+
+      const out = [];
+      for (const id of order) {
+        if (!id) continue;
+        if (id === hostId) {
+          out.push({id, name: clientState.hostName || '房主', isHost:true});
+        } else if (clientState.players?.[id]) {
+          out.push({id, name: clientState.players[id].name, isHost:false});
+        }
+      }
       return out;
     }
 
