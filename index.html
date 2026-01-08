@@ -858,7 +858,7 @@
 
     // -------------------- UI helpers --------------------
     // Build/version stamp (used for update check)
-    const APP_BUILD = '2026-01-07-2';
+    const APP_BUILD = '2026-01-07-1';
     let swReg = null;
     let updateCheckTimer = null;
 
@@ -2616,28 +2616,37 @@
       if (c === 'threeStraightFlush') ok = canBeStraight2(head) && canBeFlush2(head) && eMid.cat === 5 && eTail.cat === 5;
       if (c === 'noHand') {
         // 百無（3高牌）：不允許「刻意拆牌」來達成。
-        // 規則：只看頭/中/尾墩的 8 張牌（不含選莊牌），只要在任何組合下「可以」構成任何牌型（對子/順子/三條/同花順；含鬼牌百搭），就視為報到失敗。
-        // 這裡用更嚴格、與擺牌無關的判斷（以 8 張為準）：
-        // - 有任何鬼牌 -> 一定可組牌型 -> 失敗
-        // - 有任何重複點數 -> 可組對子 -> 失敗
-        // - 任意三個點數可成 3 張順子（含 A23）-> 失敗
+        // 規則：只看頭/中/尾墩的 8 張牌（不含選莊牌）。
+        // 只要這 8 張牌在任何 3 張組合下「可以」構成任何牌型（對子/順子/三條/同花順；鬼牌百搭），就視為報到失敗。
+        // 注意：本遊戲已刪除「同花」牌型，因此「三張同花」不應令百無失敗。
+        // 這裡用枚舉 8C3 的方式判斷（不看花色同花，僅看 eval3NoJoker 的 cat>0）。
         const eight = [...(head || []), ...(mid || []), ...(tail || [])].filter(Boolean);
         const anyJoker = eight.some(x => x.s === 'J');
         if (anyJoker) {
           ok = false;
         } else {
-          const nonJ8 = eight.filter(x => x.s !== 'J');
-          const ranks = nonJ8.map(x => x.r);
+          // Quick reject: any duplicate ranks => can form a pair
+          const ranks = eight.map(x => x.r);
           const set = new Set(ranks);
           if (set.size !== ranks.length) {
             ok = false;
           } else {
-            let canStraight = false;
-            for (const r of set) {
-              if (set.has(r + 1) && set.has(r + 2)) { canStraight = true; break; }
+            let canMakeAnyHand = false;
+            for (let i=0;i<eight.length;i++) {
+              for (let j=i+1;j<eight.length;j++) {
+                for (let k=j+1;k<eight.length;k++) {
+                  const e3 = eval3NoJoker([eight[i], eight[j], eight[k]]);
+                  // eval3NoJoker: cat>0 means (pair/straight/trips/straight flush). "同花"已刪除，不會出現 cat=2。
+                  if ((e3?.cat || 0) > 0) {
+                    canMakeAnyHand = true;
+                    break;
+                  }
+                }
+                if (canMakeAnyHand) break;
+              }
+              if (canMakeAnyHand) break;
             }
-            if (set.has(14) && set.has(2) && set.has(3)) canStraight = true;
-            ok = !canStraight;
+            ok = !canMakeAnyHand;
           }
         }
       }
@@ -3385,6 +3394,17 @@
 
         const name = String(msg.name || '玩家').slice(0,20);
         const existed = hostState.players[pid];
+
+        // Allow re-join anytime, but block NEW players from entering while a round is in progress.
+        // This prevents breaking the current round (they won't have been dealt and would block settlement).
+        const roundInProgress = (hostState.round > 0) && !hostState.revealed;
+        if (!existed && roundInProgress) {
+          try { send(conn, {t:'error', message:'本局進行中，請下一局前再加入（可等房主按「下一局」後再入座）'}); } catch {}
+          try { conn.close(); } catch {}
+          log(`拒絕加入（本局進行中）：${pid}`);
+          return;
+        }
+
         hostState.players[pid] = {
           id: pid,
           name,
@@ -3393,11 +3413,36 @@
           lastSeen: Date.now(),
           disconnectedAt: null,
         };
+
         renderPlayers();
         send(conn, {t:'welcome', hostId, hostName: (clientState.myName || '房主'), settings: hostState.settings, me: {id: pid}, cumulative: hostState.cumulative});
         broadcastPlayers();
         broadcast({t:'settings', settings: hostState.settings});
         log(`${existed ? '玩家重連' : '玩家加入'}：${name} (${pid})`);
+
+        // If this is a re-join during an active round, re-send their current hand so they can continue.
+        try {
+          if (existed && roundInProgress && hostState.dealt?.[pid]?.all9) {
+            const ready = readyMapForBroadcast();
+            send(conn, {
+              t:'deal',
+              round: hostState.round,
+              cards9: hostState.dealt[pid].all9,
+              ready,
+              resume: true,
+            });
+            send(conn, {t:'ready', ready});
+            log(`已補發本局手牌給重連玩家：${name} (${pid})`);
+          }
+        } catch {}
+
+        // If game already finished this round but not started next, tell the player to wait.
+        try {
+          if (!existed && hostState.round > 0 && hostState.revealed) {
+            send(conn, {t:'waitNextRound', round: hostState.round});
+          }
+        } catch {}
+
         // start heartbeat as soon as we have at least one player
         startHostHeartbeat();
         return;
@@ -3741,6 +3786,14 @@
         renderGameHeader();
         $('btnOpenLastReveal').classList.add('hidden');
         glog('準備下一局…');
+        return;
+      }
+
+      if (msg.t === 'waitNextRound') {
+        // Informational: joined between rounds; wait for next deal.
+        const r = Number(msg.round || 0);
+        toast(r ? `已加入房間，請等待房主開始第 ${r+1} 局` : '已加入房間，請等待房主開始下一局');
+        try { showPage('game'); renderTableSeats(); } catch {}
         return;
       }
 
@@ -4650,11 +4703,16 @@
         badge.dataset.pid = p.id;
         badge.id = 'seatBadge_' + p.id;
 
-        // player icon (by name)
+        // player icon (by name) + dealer-card badge (shown only after reveal)
+        const iconRow = el('div', 'flex items-center justify-center gap-1 mb-1');
+
         const iconNode = createPlayerIconNode(p.name);
         if (iconNode) {
-          iconNode.classList.remove('mx-auto');
-          iconNode.classList.add('mx-auto');
+          // remove center-only layout; we now place it inside a row
+          try {
+            iconNode.classList.remove('mx-auto');
+            iconNode.classList.remove('mb-1');
+          } catch {}
 
           // Ready tick (submitted)
           const ready = !!(clientState.readyMap && clientState.readyMap[p.id]);
@@ -4665,13 +4723,28 @@
 
             const tick = el('div','absolute right-0 bottom-0 w-5 h-5 rounded-full bg-emerald-500/95 border border-emerald-200/50 flex items-center justify-center text-[11px] font-black text-emerald-950 pointer-events-none');
             tick.style.transform = 'translate(22%, 22%)';
-            tick.style.zIndex = '5';
+            tick.style.zIndex = '6';
             tick.textContent = '✓';
             iconNode.appendChild(tick);
           }
 
-          badge.appendChild(iconNode);
+          iconRow.appendChild(iconNode);
         }
+
+        const dealerBadge = el('div', 'hidden text-[10px] px-1.5 py-0.5 rounded-md bg-black/35 border border-amber-200/20 text-amber-100 font-black mono');
+        dealerBadge.id = 'seatDealer_' + p.id;
+
+        // Only show dealer card after reveal (clientState.lastReveal)
+        try {
+          const dc = clientState.lastReveal?.submissions?.[p.id]?.dealerCard || null;
+          if (dc) {
+            dealerBadge.textContent = cardLabel(dc);
+            dealerBadge.classList.remove('hidden');
+          }
+        } catch {}
+
+        iconRow.appendChild(dealerBadge);
+        badge.appendChild(iconRow);
 
         // Seat name line (dealer crown will be added during reveal)
         const nameLine = el('div', 'text-xs font-black text-slate-50 truncate text-center', p.name + (p.isHost ? '（房主）' : ''));
@@ -4728,6 +4801,21 @@
         n.textContent = (p.name || '').replace(/^👑\s*/,'') + (p.isHost ? '（房主）' : '');
         if (p.id === dealerId) n.textContent = '👑 ' + n.textContent;
       }
+
+      // Show dealer-card badge next to icon (after reveal)
+      try {
+        for (const p of (players || [])) {
+          const b = document.getElementById('seatDealer_' + p.id);
+          if (!b) continue;
+          const dc = subs?.[p.id]?.dealerCard || null;
+          if (dc) {
+            b.textContent = cardLabel(dc);
+            b.classList.remove('hidden');
+          } else {
+            b.classList.add('hidden');
+          }
+        }
+      } catch {}
 
       const mkCardLine = (count) => {
         const line = el('div', 'flex gap-0 flex-nowrap');
