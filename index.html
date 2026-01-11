@@ -329,6 +329,7 @@
                 <div class="flex items-center gap-2">
                   <div class="rounded-full px-3 py-1 chip text-amber-100 text-xs font-black">HKE九張</div>
                   <button id="btnUpdateApp" type="button" class="hidden text-[11px] px-2.5 py-1.5 rounded-full bg-amber-400/15 border border-amber-200/25 text-amber-100 font-black hover:brightness-110">更新</button>
+                  <button id="btnOpenScoreboard" type="button" class="text-[11px] px-2.5 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 text-emerald-50">計分版</button>
                 </div>
                 <div class="text-[11px] text-emerald-100/70">房間</div>
               </div>
@@ -677,9 +678,9 @@
             <div id="chatStickers" class="mt-2 grid grid-cols-5 sm:grid-cols-6 gap-2"></div>
           </section>
 
-          <details class="rounded-2xl bg-black/20 border border-white/10 p-3">
+          <details id="debugPanel" class="rounded-2xl bg-black/20 border border-white/10 p-3 hidden">
             <summary class="cursor-pointer select-none text-xs text-emerald-100/70">DEBUG（Drive Icon Lookup）</summary>
-            <div class="mt-2 text-[10px] text-emerald-100/60">只顯示本機 icon 查詢/載入狀態，不會廣播。</div>
+            <div class="mt-2 text-[10px] text-emerald-100/60">預設關閉。啟用：localStorage.setItem('ninePokerDebug','1') 後重載。只顯示本機 icon 查詢/載入狀態，不會廣播。</div>
             <div id="chatDebug" class="mt-2 text-[11px] text-emerald-100/70 space-y-1 max-h-32 overflow-auto pr-1"></div>
           </details>
 
@@ -703,6 +704,7 @@
       <div class="w-full sm:max-w-5xl rounded-2xl panel border border-amber-200/20 modal-in flex flex-col max-h-full overflow-hidden">
         <div class="p-1 border-b border-white/10 flex items-center justify-end gap-1.5">
           <div class="sr-only">排牌 / 提交</div>
+          <div id="arrangeTimerText" class="mr-auto text-[10px] text-emerald-100/70 mono">—</div>
           <button id="btnAutoFill" class="text-[10px] px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">快速排</button>
           <button id="btnResetArrange" class="text-[10px] px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">重排</button>
           <button id="btnCloseArrange" class="text-[10px] px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
@@ -763,13 +765,60 @@
               <option value="noHand">百無 +3（3高牌）</option>
             </select>
             <button id="btnSubmit" class="shrink-0 px-3 py-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 hover:brightness-105 font-black text-[11px]">提交</button>
-            <div class="text-[10px] text-emerald-50/80 shrink-0">狀態：<span id="submitStatus2">—</span></div>
+            <div class="text-[10px] text-emerald-50/80 shrink-0">限時：<span id="arrangeTimerText2" class="mono">—</span>｜狀態：<span id="submitStatus2">—</span></div>
           </div>
         </div>
 
         <div class="hidden p-4 border-t border-white/10 items-center justify-between gap-2">
           <div class="text-xs text-emerald-100/70">提示：手牌在底部，可直接互換放入。</div>
           <button id="btnCloseArrange2" class="text-xs px-3 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-semibold hover:brightness-105">好</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scoreboard Modal (DAY / MON) -->
+  <div id="scoreboardModal" class="hidden fixed inset-0 z-[52]">
+    <div class="absolute inset-0 backdrop" id="scoreboardBackdrop"></div>
+    <div class="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center p-3">
+      <div class="w-full sm:max-w-2xl rounded-2xl panel border border-amber-200/20 modal-in">
+        <div class="p-4 border-b border-white/10 flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs text-emerald-100/70">計分版</div>
+            <div class="mt-1 text-lg font-black tracking-tight">DAY / MONTH</div>
+            <div class="mt-1 text-xs text-emerald-100/70">資料來源：GitHub records/DAY.json、records/MON.json（只顯示累計）</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btnScoreboardRefresh" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">重新載入</button>
+            <button id="btnCloseScoreboard" class="text-xs px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">關閉</button>
+          </div>
+        </div>
+
+        <div class="p-4 grid gap-3 max-h-[70vh] overflow-auto">
+          <div class="flex items-center gap-2">
+            <button id="btnTabDay" type="button" class="text-xs px-3 py-2 rounded-xl border border-white/10 bg-amber-400/15 text-amber-100 font-black">DAY</button>
+            <button id="btnTabNig" type="button" class="text-xs px-3 py-2 rounded-xl border border-white/10 bg-white/10 hover:bg-white/15 text-emerald-50 font-black">MON</button>
+            <div id="scoreboardStatus" class="ml-auto text-[11px] text-emerald-100/70">—</div>
+          </div>
+
+          <section class="rounded-2xl bg-black/20 border border-white/10 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold">排行榜</div>
+              <div class="text-xs text-emerald-100/70">依累計分數排序</div>
+            </div>
+            <div class="mt-2 overflow-auto">
+              <table class="w-full text-sm">
+                <thead class="text-emerald-100/80">
+                  <tr class="border-b border-white/10">
+                    <th class="text-left py-2">排名</th>
+                    <th class="text-left py-2">玩家</th>
+                    <th class="text-left py-2">累計</th>
+                  </tr>
+                </thead>
+                <tbody id="scoreboardBody"></tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -954,8 +1003,15 @@
       $('log').prepend(line);
     };
 
+    // Debug toggle (local-only). Enable via:
+    //   localStorage.setItem('ninePokerDebug','1'); location.reload();
+    // Disable via:
+    //   localStorage.removeItem('ninePokerDebug'); location.reload();
+    const DEBUG_ENABLED = (localStorage.getItem('ninePokerDebug') === '1');
+
     // Debug log (local-only) shown inside Chat modal
     const dlog = (msg) => {
+      if (!DEBUG_ENABLED) return;
       const box = $('chatDebug');
       if (!box) return;
       const line = el('div', 'text-emerald-100/70', `[${nowTime()}] ${msg}`);
@@ -1311,7 +1367,7 @@
     }
 
     function updateBodyOverflow() {
-      const ids = ['revealModal','gameOverModal','statusModal','reportModal','logModal','dealerPickPreModal','arrangeModal'];
+      const ids = ['revealModal','gameOverModal','statusModal','reportModal','logModal','dealerPickPreModal','arrangeModal','scoreboardModal'];
       const anyOpen = ids.some(id => {
         const n = $(id);
         return n && !n.classList.contains('hidden');
@@ -1536,6 +1592,7 @@
       updateBodyOverflow();
       // ensure slots are rendered when opening
       try { renderGameHeader(); renderSlots(); renderHand(); } catch {}
+      try { setArrangeTimerText(); } catch {}
     }
 
     function closeArrangeModal() {
@@ -1639,6 +1696,114 @@
       $('logModal').classList.add('hidden');
       updateBodyOverflow();
       updateChatUnread();
+    }
+
+    // -------------------- Scoreboard (DAY/MON) --------------------
+    const scoreboardState = {
+      tab: 'DAY',
+      cache: { DAY: null, MON: null },
+      loading: false,
+    };
+
+    function setScoreboardTab(tab) {
+      const t = String(tab||'DAY').toUpperCase();
+      scoreboardState.tab = (t === 'MON' ? 'MON' : 'DAY');
+      const btnDay = $('btnTabDay');
+      const btnNig = $('btnTabNig'); // keep id for backward-compat UI
+      if (btnDay && btnNig) {
+        const on = 'bg-amber-400/15 text-amber-100 border-amber-200/20';
+        const off = 'bg-white/10 hover:bg-white/15 text-emerald-50 border-white/10';
+        btnDay.className = 'text-xs px-3 py-2 rounded-xl border font-black ' + (scoreboardState.tab==='DAY' ? on : off);
+        btnNig.className = 'text-xs px-3 py-2 rounded-xl border font-black ' + (scoreboardState.tab==='MON' ? on : off);
+      }
+      renderScoreboardTable();
+    }
+
+    function setScoreboardStatus(text) {
+      const eln = $('scoreboardStatus');
+      if (eln) eln.textContent = text || '—';
+    }
+
+    function renderScoreboardTable() {
+      const body = $('scoreboardBody');
+      if (!body) return;
+      body.innerHTML = '';
+      const tab = scoreboardState.tab;
+      const data = scoreboardState.cache[tab];
+      const scores = (data && typeof data === 'object' && data.scoresByName && typeof data.scoresByName === 'object')
+        ? data.scoresByName
+        : {};
+
+      const rows = Object.entries(scores)
+        .map(([name, score]) => ({ name: String(name||''), score: Number(score||0) }))
+        .filter(r => r.name)
+        .sort((a,b) => b.score - a.score);
+
+      if (!rows.length) {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-white/5';
+        const td = el('td','py-3 text-emerald-50/70 text-sm','尚無資料');
+        td.colSpan = 3;
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+      }
+
+      rows.forEach((r, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-white/5';
+        tr.appendChild(el('td','py-2 pr-2 mono text-emerald-50/80', String(idx+1)));
+        tr.appendChild(el('td','py-2 pr-2 text-slate-50 font-semibold', r.name));
+        const v = r.score;
+        const tdScore = el('td','py-2 pr-2 mono font-black', String(v));
+        tdScore.classList.add(v>0?'text-emerald-200':(v<0?'text-rose-200':'text-emerald-50/80'));
+        tr.appendChild(tdScore);
+        body.appendChild(tr);
+      });
+    }
+
+    async function fetchScoreboard(roomId) {
+      let rid = String(roomId||'').trim().toUpperCase();
+      // backward-compat: NIG is now MON
+      if (rid === 'NIG' || rid === 'NIGHT') rid = 'MON';
+      if (!['DAY','MON'].includes(rid)) return null;
+      const url = `https://raw.githubusercontent.com/${PERSIST_REPO.owner}/${PERSIST_REPO.repo}/${PERSIST_REPO.branch}/${PERSIST_REPO.dir}/${encodeURIComponent(rid)}.json?bust=${Date.now()}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function loadScoreboard(force=false) {
+      if (scoreboardState.loading) return;
+      scoreboardState.loading = true;
+      setScoreboardStatus('載入中…');
+      try {
+        if (force) { scoreboardState.cache.DAY = null; scoreboardState.cache.MON = null; }
+        if (!scoreboardState.cache.DAY) scoreboardState.cache.DAY = await fetchScoreboard('DAY');
+        if (!scoreboardState.cache.MON) scoreboardState.cache.MON = await fetchScoreboard('MON');
+        const dayAt = scoreboardState.cache.DAY?.updatedAt ? String(scoreboardState.cache.DAY.updatedAt) : '';
+        const monAt = scoreboardState.cache.MON?.updatedAt ? String(scoreboardState.cache.MON.updatedAt) : '';
+        setScoreboardStatus(`DAY:${dayAt ? dayAt.slice(0,19).replace('T',' ') : '—'} | MON:${monAt ? monAt.slice(0,19).replace('T',' ') : '—'}`);
+        renderScoreboardTable();
+      } catch (e) {
+        setScoreboardStatus('載入失敗：' + (e?.message || e));
+        renderScoreboardTable();
+      } finally {
+        scoreboardState.loading = false;
+      }
+    }
+
+    function openScoreboardModal() {
+      $('scoreboardModal').classList.remove('hidden');
+      updateBodyOverflow();
+      // default tab DAY
+      setScoreboardTab(scoreboardState.tab || 'DAY');
+      loadScoreboard(false);
+    }
+
+    function closeScoreboardModal() {
+      $('scoreboardModal').classList.add('hidden');
+      updateBodyOverflow();
     }
 
     function sendChatText(text) {
@@ -2874,7 +3039,7 @@
     // Write: Cloudflare Worker (free) that holds a GitHub token and commits back to the repo.
     // Fallback: always cache to localStorage so the host device can recover even if worker fails.
 
-    const PERSIST_ROOM_IDS = new Set(['DAY','NIG']);
+    const PERSIST_ROOM_IDS = new Set(['DAY','MON']);
 
     // Where to store records in the GitHub repo
     const PERSIST_REPO = {
@@ -3106,6 +3271,7 @@
         }
       } catch {}
       clientReconnectAttempts = 0;
+      try { stopArrangeTimer(); } catch {}
 
       if (peer) {
         try { peer.destroy(); } catch {}
@@ -4356,6 +4522,7 @@
       closeModalsForNewHand();
       toast(`第 ${hostState.round} 局已開始，請排牌`);
       openArrangeModal();
+      startArrangeTimer();
     }
 
     function computeDealerIdFromSubmissions() {
@@ -5853,12 +6020,68 @@
     // -------------------- Submit / Arrange --------------------
     const ARRANGE_LIMIT_MS = 60000;
     let arrangeTimer = null;
+    let arrangeCountdownTimer = null;
+    let arrangeDeadline = 0;
+
+    function setArrangeTimerText() {
+      const eln = $('arrangeTimerText');
+      const eln2 = $('arrangeTimerText2');
+      const bb = !!(isHost ? hostState.settings.bbMode : clientState.settings.bbMode);
+
+      const setBoth = (txt, cls=null) => {
+        try {
+          if (eln) {
+            eln.textContent = txt;
+            if (cls) eln.className = cls;
+          }
+        } catch {}
+        try {
+          if (eln2) eln2.textContent = txt.replace(/^限時\s*/,'').replace(/s$/,'');
+        } catch {}
+      };
+
+      if (bb) {
+        if (eln) {
+          eln.textContent = 'BB';
+          eln.className = 'mr-auto text-[10px] text-emerald-100/70 mono';
+        }
+        if (eln2) eln2.textContent = 'BB';
+        return;
+      }
+
+      if (!arrangeDeadline || clientState.submitted || !(clientState.cards9 && clientState.cards9.length)) {
+        if (eln) {
+          eln.textContent = '—';
+          eln.className = 'mr-auto text-[10px] text-emerald-100/70 mono';
+        }
+        if (eln2) eln2.textContent = '—';
+        return;
+      }
+
+      const leftMs = Math.max(0, arrangeDeadline - Date.now());
+      const sec = Math.ceil(leftMs / 1000);
+      const cls = 'mr-auto text-[10px] mono ' + (sec <= 10 ? 'text-rose-200' : 'text-emerald-100/70');
+      if (eln) {
+        eln.textContent = `限時 ${sec}s`;
+        eln.className = cls;
+      }
+      if (eln2) {
+        eln2.textContent = `${sec}s`;
+        eln2.className = 'mono ' + (sec <= 10 ? 'text-rose-200' : 'text-emerald-50/80');
+      }
+    }
 
     function stopArrangeTimer() {
       if (arrangeTimer) {
         clearTimeout(arrangeTimer);
         arrangeTimer = null;
       }
+      if (arrangeCountdownTimer) {
+        clearInterval(arrangeCountdownTimer);
+        arrangeCountdownTimer = null;
+      }
+      arrangeDeadline = 0;
+      setArrangeTimerText();
     }
 
     function autoFillRandomAllowFoul() {
@@ -5890,9 +6113,13 @@
       stopArrangeTimer();
       // BB mode disables timer
       const bb = !!(isHost ? hostState.settings.bbMode : clientState.settings.bbMode);
-      if (bb) return;
-      if (!clientState.cards9 || clientState.cards9.length === 0) return;
-      if (clientState.submitted) return;
+      if (bb) { setArrangeTimerText(); return; }
+      if (!clientState.cards9 || clientState.cards9.length === 0) { setArrangeTimerText(); return; }
+      if (clientState.submitted) { setArrangeTimerText(); return; }
+
+      arrangeDeadline = Date.now() + ARRANGE_LIMIT_MS;
+      setArrangeTimerText();
+      arrangeCountdownTimer = setInterval(setArrangeTimerText, 250);
 
       arrangeTimer = setTimeout(() => {
         if (clientState.submitted) return;
@@ -6013,6 +6240,7 @@
         $('submitStatus').textContent = '已提交';
         $('submitStatus').className = 'text-xs text-emerald-200';
         clientState.submitted = true;
+        stopArrangeTimer();
 
         // auto close arrange modal back to table
         try { closeArrangeModal(); } catch {}
@@ -6068,6 +6296,7 @@
       try {
         send(clientConn, payload);
         clientState.submitted = true;
+        stopArrangeTimer();
         $('submitStatus').textContent = '已提交';
         $('submitStatus').className = 'text-xs text-emerald-200';
         glog('已送出提交');
@@ -6303,6 +6532,17 @@
         toast(e?.message || '無法產生分享連結');
       }
     });
+
+    // Scoreboard (Lobby)
+    $('btnOpenScoreboard')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      openScoreboardModal();
+    });
+    $('btnCloseScoreboard')?.addEventListener('click', closeScoreboardModal);
+    $('scoreboardBackdrop')?.addEventListener('click', closeScoreboardModal);
+    $('btnTabDay')?.addEventListener('click', () => setScoreboardTab('DAY'));
+    $('btnTabNig')?.addEventListener('click', () => setScoreboardTab('MON'));
+    $('btnScoreboardRefresh')?.addEventListener('click', () => loadScoreboard(true));
 
     // App update button (lobby)
     $('btnUpdateApp')?.addEventListener('click', (e) => {
@@ -6666,6 +6906,12 @@
             toast('iOS：建議用 Safari「加入主畫面」以 PWA 模式使用（全屏更穩定）');
           }
         }
+      } catch {}
+
+      // Show/hide debug panel
+      try {
+        const dp = $('debugPanel');
+        if (dp) dp.classList.toggle('hidden', !DEBUG_ENABLED);
       } catch {}
 
       // Init stickers for chat
