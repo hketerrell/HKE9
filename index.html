@@ -2743,7 +2743,7 @@
         return pairs >= 4;
       };
 
-      const canMakeLength9Straight = (requireSameColor=null) => {
+       const canMakeLength9Straight = (requireSameColor=null) => {
         // requireSameColor: 'red' | 'black' | null
         if (requireSameColor) {
           if (requireSameColor === 'red' && nonJ.some(x => !isRed(x.s))) return false;
@@ -2752,18 +2752,28 @@
 
         const ranks = nonJ.map(x => x.r);
         const uniq = new Set(ranks);
-        if (uniq.size !== ranks.length) return false; // duplicates can't be fixed
+        if (uniq.size !== ranks.length) return false; // 一條龍不可有對子
 
-        if (ranks.length === 0) return true; // all jokers
-        const minR = Math.min(...ranks);
-        const maxR = Math.max(...ranks);
-        if (maxR - minR > 8) return false;
+        if (ranks.length === 0) return true; // 全鬼牌
 
-        // count missing ranks inside [minR..minR+8]
-        const need = new Set();
-        for (let r=minR; r<=minR+8; r++) need.add(r);
-        for (const r of ranks) need.delete(r);
-        return need.size <= jokers;
+        // 檢查情況 1: Ace 當作 14 (例如 6-7-...-Q-K-A)
+        let minR = Math.min(...ranks);
+        let maxR = Math.max(...ranks);
+        const spanHigh = maxR - minR;
+        
+        // 檢查情況 2: Ace 當作 1 (例如 A-2-3-...-8-9)
+        let spanLow = 999;
+        if (ranks.includes(14)) {
+            // 將 14 (Ace) 暫時換成 1 來計算跨度
+            const lowRanks = ranks.map(r => r === 14 ? 1 : r);
+            const minL = Math.min(...lowRanks);
+            const maxL = Math.max(...lowRanks);
+            spanLow = maxL - minL;
+        }
+
+        // 只要任一種情況跨度 <= 8，且缺少的牌數夠鬼牌補，即成立
+        // 因不重複且假設鬼牌夠，只要 Span <= 8 即可
+        return (spanHigh <= 8) || (spanLow <= 8);
       };
 
       // 2/3/3 版本的「三蛇 / 三同花順 / 百無」用各墩判斷（頭墩為 2 張用 canBeStraight2/canBeFlush2）
