@@ -915,6 +915,23 @@
     let swReg = null;
     let updateCheckTimer = null;
 
+    // 【新增】統一取得「名字+房主+分數」的字串
+    function getFormattedName(p) {
+      // 1. 處理基本名稱
+      let base = p.name || '無名氏';
+  
+      // 2. 處理房主標記
+      if (p.isHost) {
+        base += '（房主）';
+      }
+
+      // 3. 處理分數 (讀取 clientState.cumulative)
+      const currentScore = (clientState.cumulative && clientState.cumulative[p.id]) || 0;
+      const scoreText = currentScore > 0 ? `+${currentScore}` : `${currentScore}`;
+
+      return `${base} ${scoreText}`;
+    }
+    
     function isLobbyVisible() {
       const lobby = $('pageLobby');
       return lobby && !lobby.classList.contains('hidden');
