@@ -5328,7 +5328,13 @@ function revealRound() {
         const n = document.getElementById('seatName_' + p.id);
         if (!n) continue;
         // remove any old crown
-        n.textContent = (p.name || '').replace(/^👑\s*/,'') + (p.isHost ? '（房主）' : '');
+        const currentScore = clientState.cumulative[p.id] || 0;
+        const scoreText = currentScore > 0 ? `+${currentScore}` : currentScore;
+        let baseName = (p.name || '').replace(/^👑\s*/,'');
+        // 移除舊的分數後綴以免重複 (簡單的 regex 處理)
+        baseName = baseName.replace(/\s[+\-]?\d+$/, ''); 
+
+        n.textContent = `${baseName} ${scoreText}`;
         if (p.id === dealerId) n.textContent = '👑 ' + n.textContent;
       }
 
