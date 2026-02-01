@@ -5075,8 +5075,12 @@ function revealRound() {
         // player icon (by name)
         const iconNode = createPlayerIconNode(p.name);
         if (iconNode) badge.appendChild(iconNode);
+        
+        const currentScore = clientState.cumulative[p.id] || 0;
+        const scoreText = currentScore > 0 ? `+${currentScore}` : currentScore;
+        const hostLabel = p.isHost ? '（房主）' : ''; 
 
-        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate text-center', p.name + (p.isHost ? '（房主）' : ''));
+        const nameLine = el('div', 'text-xs font-black text-slate-50 truncate text-center', `${p.name}${hostLabel} ${scoreText}`);
         badge.appendChild(nameLine);
         badge.appendChild(el('div','text-[10px] text-emerald-100/70 mt-1 text-center', '已入座'));
 
