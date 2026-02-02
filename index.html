@@ -5771,6 +5771,55 @@ function revealRound() {
         btn.classList.add('opacity-95');
         btn.disabled = true;
       }
+      // --- 新增開始 ---
+      // 只有在手牌(hand)、卡槽(slot)或選莊(dealer)內的牌才需要拖曳
+      // 排除 mini (結算畫面)
+      if (opts.variant !== 'mini' && !opts.locked && !opts.back) {
+        // 為了讓 elementFromPoint 能抓到，加入 drop-zone 標記
+        // (這樣如果拖牌去撞另一張牌，也能識別為目標)
+        if (opts.variant === 'hand') {
+             btn.dataset.dropZone = 'true';
+             btn.dataset.zone = 'hand';
+        }
+        
+        // 準備來源資料 ref
+        let srcRef = null;
+        if (opts.variant === 'hand') srcRef = { zone: 'hand', key: key };
+        // 注意：卡槽內的牌是在 renderSlotCell 時處理，但卡牌本身也需要能被抓起來
+        // 這裡我們先設定通用事件，具體 ref 由外部或 dataset 決定
+        // 簡單起見，我們讓 renderHand 和 renderSlotCell 呼叫 renderCard 後再綁定具體 ref，
+        // 或者在這裡判斷。
+        
+        // 綁定事件
+        const startDrag = (e) => {
+            // 如果是在 Slot 裡的牌，我們需要知道是哪個 Slot
+            // 透過 DOM 往上找
+            let ref = srcRef; 
+            if (!ref) {
+                const parentSlot = btn.closest('[data-zone="slot"]');
+                if (parentSlot) {
+                    ref = { 
+                        zone: 'slot', 
+                        slot: parentSlot.dataset.slot, 
+                        idx: parseInt(parentSlot.dataset.idx) 
+                    };
+                }
+                const parentDealer = btn.closest('[data-zone="dealer"]');
+                if (parentDealer) {
+                    ref = { zone: 'dealer' };
+                }
+            }
+            if (ref) handleDragStart(e, ref);
+        };
+
+        btn.addEventListener('touchstart', startDrag, {passive: false});
+        btn.addEventListener('mousedown', startDrag);
+        
+        // 重要：CSS 確保手指不會觸發瀏覽器縮放
+        btn.style.touchAction = 'none'; 
+      }
+      // --- 新增結束 ---
+
       return btn;
     }
 
