@@ -717,23 +717,21 @@
     
     <div class="absolute inset-0 z-10 flex flex-col bg-slate-950/90 h-full w-full pointer-events-auto">
       
-      <div class="shrink-0 flex items-center justify-between px-4 py-2 border-b border-white/10 bg-black/40 backdrop-blur-md relative z-20">
-         <div class="flex flex-col">
-            <div class="text-[10px] text-emerald-100/60">排牌階段</div>
-            <div id="arrangeTimerText" class="text-sm font-bold text-emerald-100 mono">--</div>
-         </div>
-         
-         <div class="flex gap-2">
-            <button id="btnAutoFill" class="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 active:scale-95 transition">快速</button>
-            <button id="btnResetArrange" class="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 active:scale-95 transition">重排</button>
-            <button id="btnCloseArrange" class="text-xs px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-100 active:scale-95 transition">關閉</button>
+      <div class="absolute top-3 left-4 z-30 pointer-events-none">
+         <div class="flex flex-col items-start">
+            <div class="text-[10px] text-emerald-100/60 shadow-black drop-shadow-md">排牌階段</div>
+            <div id="arrangeTimerText" class="text-lg font-bold text-emerald-100 mono shadow-black drop-shadow-md">--</div>
          </div>
       </div>
 
+      <button id="btnCloseArrange" class="absolute top-3 right-3 z-30 w-9 h-9 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-100 flex items-center justify-center active:scale-95 transition backdrop-blur-md">
+        ✕
+      </button>
+
       <div class="flex-1 w-full h-full overflow-y-auto overflow-x-hidden relative">
-        <div class="flex flex-row items-center justify-center gap-2 sm:gap-6 min-h-full pb-40 p-2">
+        <div class="flex flex-col items-center justify-center gap-4 min-h-full pb-20 p-2 pt-14">
           
-          <div class="flex flex-col gap-2 select-none">
+          <div class="flex flex-col gap-2 select-none scale-105 sm:scale-100 origin-top">
              
              <div class="flex items-center gap-2 justify-end">
                 <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
@@ -751,27 +749,34 @@
              </div>
 
              <div class="flex items-center gap-2 justify-end">
-                <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
+                 <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
                     <span>尾</span><span>墩</span>
                 </div>
                 <div id="slotTail" class="grid grid-cols-3 gap-1"></div>
              </div>
           </div>
 
-          <div class="flex flex-col justify-between h-[230px] w-28 sm:w-32 shrink-0 py-1 select-none">
+          <div class="flex flex-col w-full max-w-[320px] gap-3 p-3 rounded-2xl bg-white/5 border border-white/5 relative z-10">
              
-             <div class="flex flex-col items-center gap-1">
-                <div class="text-[10px] text-amber-100/60 font-bold">選莊</div>
-                <div id="dealerCardSlot" class="shrink-0 shadow-[0_0_20px_rgba(251,191,36,0.15)]"></div>
+             <div class="flex items-end justify-between gap-2">
+                 <div class="flex flex-col items-center gap-1">
+                    <div class="text-[10px] text-amber-100/60 font-bold">選莊</div>
+                    <div id="dealerCardSlot" class="shrink-0 shadow-[0_0_20px_rgba(251,191,36,0.15)]"></div>
+                 </div>
+
+                 <div class="flex gap-2 mb-1">
+                    <button id="btnAutoFill" class="h-9 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">快速</button>
+                    <button id="btnResetArrange" class="h-9 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">重排</button>
+                 </div>
              </div>
 
-             <div class="flex flex-col gap-2 relative z-10">
+             <div class="flex flex-col gap-2">
                 <div class="flex flex-col gap-1">
                    <div class="flex justify-between items-end">
                       <label class="text-[10px] text-emerald-100/40">報到</label>
                       <span id="submitStatus2" class="text-[10px] text-emerald-100/80 scale-90 origin-right">—</span>
                    </div>
-                   <select id="selReport" class="bg-slate-800 border border-white/20 rounded px-1 py-1.5 text-[11px] text-slate-100 outline-none w-full appearance-none text-center font-bold shadow-sm">
+                   <select id="selReport" class="bg-slate-950 border border-white/20 rounded-xl px-2 py-2 text-xs text-slate-100 outline-none w-full appearance-none text-center font-bold shadow-sm">
                       <option value="none">無 (不報到)</option>
                       <option value="allRed">全紅 +5</option>
                       <option value="allBlack">全黑 +5</option>
@@ -786,7 +791,7 @@
                     </select>
                 </div>
                 
-                <button id="btnSubmit" class="w-full py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-black font-black text-xs shadow-lg hover:brightness-110 active:scale-95 transition-transform">
+                <button id="btnSubmit" class="w-full py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-black font-black text-sm shadow-lg hover:brightness-110 active:scale-95 transition-transform">
                   提交
                 </button>
              </div>
@@ -3457,17 +3462,24 @@ function eval3NoJoker(cards) {
       clientReconnectAttempts = 0;
       try { stopArrangeTimer(); } catch {}
 
+      // Safe destroy peer
       if (peer) {
-        try { peer.destroy(); } catch {}
+        try { 
+            peer.destroy(); 
+        } catch (e) {
+            console.warn('Peer destroy error:', e);
+        }
       }
       peer = null;
       isHost = false;
       hostId = null;
       myId = null;
+      
       if (clientConn) {
         try { clientConn.close(); } catch {}
       }
       clientConn = null;
+      
       clientState.roomId = null;
       clientState.connected = false;
       clientState.players = {};
@@ -3485,7 +3497,7 @@ function eval3NoJoker(cards) {
       clientState.lastReveal = null;
       clientState.cumulative = {};
       clientState.bottomBarCollapsed = true;
-
+      
       hostState.settings = { roundsTotal: 5 };
       hostState.players = {};
       hostState.seatOrder = [];
@@ -3504,6 +3516,13 @@ function eval3NoJoker(cards) {
       $('scoreBody').innerHTML = '';
       $('myCumulative').textContent = '0';
 
+      // Ensure Name persists in Input
+      try {
+          const savedName = localStorage.getItem('ninePokerName') || clientState.myName || '';
+          const inp = $('inpName');
+          if (inp) inp.value = savedName;
+      } catch {}
+
       setBadge(false, '離線');
       setRoleBadges();
       renderPlayers();
@@ -3515,6 +3534,10 @@ function eval3NoJoker(cards) {
       closeRevealModal();
       updateBodyOverflow();
       updateChatUnread();
+      
+      // Force return to lobby
+      showPage('lobby');
+      
       log('已重置');
     }
 
