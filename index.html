@@ -975,17 +975,9 @@
         document.addEventListener('mouseup', handleDragEnd);
       }
       
-      const handEl = document.getElementById('hand');
-      if (handEl) {
-         handEl.classList.add('translate-y-[150%]', 'opacity-0');
-      }
-
-      // 【新增修正】拖曳開始時，讓 Hand Dock 容器「穿透」，
-      // 避免 elementFromPoint 抓到透明的 Dock 而抓不到底下的尾墩
-      const dockInner = document.querySelector('#handDock > div');
-      if (dockInner) {
-         dockInner.classList.remove('pointer-events-auto');
-         dockInner.classList.add('pointer-events-none');
+    const dock = document.getElementById('handDock');
+      if (dock) {
+         dock.style.visibility = 'hidden';
       }
     }
 
@@ -1002,52 +994,42 @@
 
     function handleDragEnd(e) {
       
-      const handEl = document.getElementById('hand');
-      if (handEl) {
-         handEl.classList.remove('translate-y-[150%]', 'opacity-0');
-      }
-
-      // 【新增修正】拖曳結束，恢復 Hand Dock 的點擊感應
-      const dockInner = document.querySelector('#handDock > div');
-      if (dockInner) {
-         dockInner.classList.remove('pointer-events-none');
-         dockInner.classList.add('pointer-events-auto');
+      // 注意：這裡不要急著把 dock 顯示回來，
+      // 必須先執行 elementFromPoint，否則 dock 會再次擋住視線
+      
+      if (!isDragging) {
+         // 如果沒有在拖曳（只是點擊），也要確保 dock 是可見的
+         const dock = document.getElementById('handDock');
+         if (dock) dock.style.visibility = '';
+         return;
       }
       
-      if (!isDragging) return;
       isDragging = false;
       if (dragGhost) {
         dragGhost.remove();
         dragGhost = null;
       }
 
-      // 移除監聽
       document.removeEventListener('touchmove', handleDragMove);
       document.removeEventListener('touchend', handleDragEnd);
       document.removeEventListener('mousemove', handleDragMove);
       document.removeEventListener('mouseup', handleDragEnd);
 
-      // 偵測放開位置
       const touch = e.changedTouches ? e.changedTouches[0] : e;
-      // 尋找具備 data-drop-zone 屬性的元素
-      // 這裡現在可以正確穿透 Hand Dock 抓到尾墩了
+      
+      // 因為 dock 還是 hidden 狀態，這裡一定能穿透抓到底下的 Slot
       const targetElem = document.elementFromPoint(touch.clientX, touch.clientY);
-      const dropTarget = targetElem ?
-         targetElem.closest('[data-drop-zone]') : null;
+      const dropTarget = targetElem ? targetElem.closest('[data-drop-zone]') : null;
 
       if (dropTarget && dragSrcRef) {
-        // 解析目標位置
         const zone = dropTarget.dataset.zone;
         let destRef = null;
 
         if (zone === 'hand') {
-            // 交換回手牌
-            // 簡化：如果目標是具體的卡牌，就交換；如果是空白處，視為移回。
             const cardTarget = targetElem.closest('[data-key]');
             if (cardTarget) {
                 destRef = { zone: 'hand', key: cardTarget.dataset.key };
             } else {
-                // 只是丟回手牌區
                  destRef = { zone: 'hand', key: dragSrcRef.key };
             }
         } else if (zone === 'dealer') {
@@ -1062,15 +1044,25 @@
 
         if (destRef) {
             applySwapOrMove(dragSrcRef, destRef);
-            // 清除原本的點擊選取狀態
             clearPick();
-            // 更新畫面
             renderGameHeader();
             renderHand();
             renderSlots();
         }
       }
       dragSrcRef = null;
+
+      // 【關鍵修改】判定完成後，才把 HandDock 顯示回來
+      const dock = document.getElementById('handDock');
+      if (dock) {
+         dock.style.visibility = '';
+         
+         // 確保裡面的手牌位置重置（防止動畫殘留）
+         const handEl = document.getElementById('hand');
+         if (handEl) {
+             handEl.classList.remove('translate-y-[150%]', 'opacity-0');
+         }
+      }
     }
     
     // 【新增】統一取得「名字+房主+分數」的字串
