@@ -472,13 +472,18 @@
       </div>
 
       <!-- Hand Dock (fixed, above bottom bar) - only shown while Arrange Modal is open -->
-      <div id="handDock" class="hand-dock fixed left-1/2 -translate-x-1/2 bottom-0 z-[56] hidden pointer-events-none w-1/2">
+      <!-- 1. 外層修改：left-1/2 -translate-x-1/2 (置中) 以及 w-3/4 (75%寬度) -->
+<div id="handDock" class="hand-dock fixed left-1/2 -translate-x-1/2 bottom-0 z-[56] hidden pointer-events-none w-3/4">
+  
   <div class="mx-auto w-full px-2 pb-2 pointer-events-auto">
     <div class="rounded-2xl p-0"> 
-      <!-- 重點在下面這行：加入了 [&>*]:shrink-0 -->
-      <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-4 flex-nowrap min-h-[110px] items-end [&>*]:shrink-0">
-        <!-- 這裡面的卡片/元素現在會保持原始寬度，超出範圍會變成可捲動 -->
+      
+      <!-- 2. 內層修改：移除 [&>*]:shrink-0，保留 flex-nowrap -->
+      <!-- 這樣當卡片數量多時，瀏覽器會嘗試壓縮卡片寬度來塞進容器 -->
+      <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-4 flex-nowrap min-h-[110px] items-end">
+        <!-- 這裡面的內容會自動被壓縮 -->
       </div>
+      
     </div>
   </div>
 </div>
