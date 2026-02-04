@@ -3464,30 +3464,36 @@ function eval3NoJoker(cards) {
       $('btnNextRound').classList.toggle('hidden', !isHost);
     }
 
-    function resetAll() {
-      // 1. 安全地停止計時器與清除狀態
-      try { persistState.enabled = false; persistState.roomId = ''; persistState.scoresByName = {}; } catch {}
+  function resetAll() {
+      // stop keepalive/reconnect timers
+      try {
+        persistState.enabled = false;
+        persistState.roomId = '';
+        persistState.fileId = null;
+        persistState.scoresByName = {};
+      } catch {}
       try { stopHostHeartbeat(); } catch {}
       try { stopClientHeartbeat(); } catch {}
-      try { if (clientReconnectTimer) { clearTimeout(clientReconnectTimer); clientReconnectTimer = null; } } catch {}
+      try {
+        if (clientReconnectTimer) {
+          clearTimeout(clientReconnectTimer);
+          clientReconnectTimer = null;
+        }
+      } catch {}
       clientReconnectAttempts = 0;
       try { stopArrangeTimer(); } catch {}
 
-      // 2. 銷毀 Peer 連線 (這是最容易出錯導致卡住的地方，必須包 try-catch)
       if (peer) {
-        try { peer.destroy(); } catch (e) { console.warn('Peer destroy error:', e); }
+        try { peer.destroy(); } catch {}
       }
       peer = null;
       isHost = false;
       hostId = null;
       myId = null;
-
       if (clientConn) {
         try { clientConn.close(); } catch {}
       }
       clientConn = null;
-
-      // 3. 重置遊戲狀態
       clientState.roomId = null;
       clientState.connected = false;
       clientState.players = {};
@@ -3505,7 +3511,7 @@ function eval3NoJoker(cards) {
       clientState.lastReveal = null;
       clientState.cumulative = {};
       clientState.bottomBarCollapsed = true;
-      
+
       hostState.settings = { roundsTotal: 5 };
       hostState.players = {};
       hostState.seatOrder = [];
@@ -3516,27 +3522,14 @@ function eval3NoJoker(cards) {
       hostState.revealed = false;
       hostState.cumulative = {};
 
-      // 4. 重置 UI
-      try { $('myPeerId').textContent = '—'; } catch {}
-      try { $('btnCopyRoom').classList.add('hidden'); } catch {}
-      try { $('btnCopyLink').classList.add('hidden'); } catch {}
-      try { $('btnLeave').classList.add('hidden'); } catch {}
-      try { $('btnOpenLastReveal').classList.add('hidden'); } catch {}
-      try { $('scoreBody').innerHTML = ''; } catch {}
-      try { $('myCumulative').textContent = '0'; } catch {}
+      $('myPeerId').textContent = '—';
+      $('btnCopyRoom').classList.add('hidden');
+      $('btnCopyLink').classList.add('hidden');
+      $('btnLeave').classList.add('hidden');
+      $('btnOpenLastReveal').classList.add('hidden');
+      $('scoreBody').innerHTML = '';
+      $('myCumulative').textContent = '0';
 
-      // 5. 【關鍵修正】恢復名稱：確保退出房間後名稱不會變空白
-      try {
-        const saved = localStorage.getItem('ninePokerName');
-        // 如果有儲存的名稱，就恢復它；否則保持原樣 (避免被清成空字串)
-        if (saved) {
-           clientState.myName = saved;
-           const inp = $('inpName');
-           if (inp) inp.value = saved;
-        }
-      } catch {}
-
-      // 6. 導航與徽章重置
       setBadge(false, '離線');
       setRoleBadges();
       renderPlayers();
@@ -3548,12 +3541,9 @@ function eval3NoJoker(cards) {
       closeRevealModal();
       updateBodyOverflow();
       updateChatUnread();
-      
-      // 7. 【關鍵修正】強制返回大廳 (放在最後確保一定執行)
-      try { showPage('lobby'); } catch (e) { console.error('ShowPage error:', e); }
-      
       log('已重置');
     }
+
 
     function ensureName() {
       const nm = $('inpName').value.trim();
