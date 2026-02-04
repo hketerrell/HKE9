@@ -455,12 +455,12 @@
       <!-- Hand Dock (fixed, above bottom bar) - only shown while Arrange Modal is open -->
       <div id="handDock" class="hand-dock fixed left-0 right-0 bottom-[56px] z-[56] hidden">
         <div class="mx-auto max-w-5xl px-2">
-          <div class="rounded-2xl panel border border-white/10 p-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-[10px] text-emerald-100/80">手牌</div>
-              <div id="selectedHint" class="text-[10px] text-emerald-100/70 text-right">未選取牌</div>
+          <div class="rounded-2xl p-0"> 
+            <div class="flex items-center justify-between gap-2 px-2 mb-1 opacity-60 mix-blend-plus-lighter">
+               <div class="text-[10px] text-emerald-100 font-bold shadow-black drop-shadow-md">手牌區</div>
+               <div id="selectedHint" class="text-[10px] text-emerald-100 font-bold shadow-black drop-shadow-md text-right">未選取牌</div>
             </div>
-            <div id="hand" class="mt-1 flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-1 flex-nowrap"></div>
+            <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-2 flex-nowrap" style="min-height: 100px;"></div>
           </div>
         </div>
       </div>
@@ -700,7 +700,7 @@
   <div id="arrangeModal" class="hidden fixed inset-0 z-[53]">
     <div class="absolute inset-0 backdrop" id="arrangeBackdrop"></div>
     <!-- Compact layout for landscape: reserve space for the Hand Dock -->
-    <div class="absolute inset-0 flex items-start justify-center p-0 pb-20">
+    <div class="absolute inset-0 flex items-start justify-center p-0 pb-10">
       <div class="w-full sm:max-w-5xl rounded-2xl panel border border-amber-200/20 modal-in flex flex-col max-h-full overflow-hidden">
         <div class="p-1 border-b border-white/10 flex items-center justify-end gap-1.5">
           <div class="sr-only">排牌 / 提交</div>
