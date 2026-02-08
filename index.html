@@ -6689,6 +6689,9 @@ function revealRound() {
       try {
         send(clientConn, payload);
         clientState.submitted = true;
+        try {
+          clientState.readyMap = { ...(clientState.readyMap || {}), [myId]: true };
+        } catch {}
         stopArrangeTimer();
         $('submitStatus').textContent = '已提交';
         $('submitStatus').className = 'text-xs text-emerald-200';
@@ -6696,6 +6699,8 @@ function revealRound() {
 
         // auto close arrange modal back to table
         try { closeArrangeModal(); } catch {}
+        try { renderTableSeats(); } catch {}
+        renderReadyList(clientState.readyMap || null);
       } catch (e) {
         toast('提交失敗：連線錯誤');
       }
