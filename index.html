@@ -3444,7 +3444,63 @@ function eval3NoJoker(cards) {
       // Best-effort cloud save via worker
       await workerWriteRecord(rid, record);
     }
+    
+    async function renamePersistNameInRecord(roomId, oldName, newName) {
+      const rid = String(roomId || '').trim().toUpperCase();
+      if (!isPersistRoomId(rid)) return;
 
+      const prev = String(oldName || '').trim();
+      const next = String(newName || '').trim();
+      if (!prev || !next || prev === next) return;
+
+      let record = null;
+
+      try {
+        const cached = localStorage.getItem(persistKey(rid, 'record'));
+        if (cached) {
+          const json = JSON.parse(cached);
+          if (json && typeof json === 'object') {
+            record = { roomId: rid, scoresByName: json.scoresByName || {} };
+          }
+        }
+      } catch {}
+
+      if (!record) {
+        const remote = await githubReadRecord(rid);
+        if (remote && typeof remote === 'object') record = remote;
+      }
+
+      if (!record || !record.scoresByName || typeof record.scoresByName !== 'object') return;
+
+      const scores = { ...(record.scoresByName || {}) };
+      if (!(prev in scores)) return;
+
+      const prevScore = Number(scores[prev] || 0);
+      if (next in scores) {
+        scores[next] = Number(scores[next] || 0) + prevScore;
+      } else {
+        scores[next] = prevScore;
+      }
+      delete scores[prev];
+
+      record.roomId = rid;
+      record.updatedAt = new Date().toISOString();
+      record.scoresByName = scores;
+
+      if (persistState.enabled && persistState.roomId === rid) {
+        persistState.scoresByName = scores;
+      }
+
+      try {
+        localStorage.setItem(persistKey(rid, 'record'), JSON.stringify({ scoresByName: scores }));
+        dlog(`Persist(Local): renamed ${prev} -> ${next} for ${rid}`);
+      } catch (e) {
+        dlog(`Persist(Local): rename cache write failed for ${rid}: ${e?.message || e}`);
+      }
+
+      await workerWriteRecord(rid, record);
+    }
+    
     function setRoleBadges() {
       const role = !peer ? '未連線' : (isHost ? '房主' : '玩家');
       $('roleBadge').textContent = role;
@@ -6870,8 +6926,13 @@ function revealRound() {
     }
 
     // -------------------- Event bindings --------------------
-    $('btnSaveName').addEventListener('click', () => {
+    $('btnSaveName').addEventListener('click', async () => {
+      const prevName = clientState.myName;
       ensureName();
+      const nextName = clientState.myName;
+      try {
+        await renamePersistNameInRecord('MON', prevName, nextName);
+      } catch {}
       toast('已儲存暱稱');
       renderPlayers();
     });
