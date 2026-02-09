@@ -2938,13 +2938,17 @@ function eval3NoJoker(cards) {
         return pairs >= 4;
       };
 
-      const canMakeLength9Straight = (requireSameColor=null) => {
+      const canMakeLength9Straight = (cards, requireSameColor=null) => {
+        const straightCards = (cards || []).filter(Boolean);
+        const straightJokers = straightCards.filter(x => x.s === 'J').length;
+        const straightNonJ = straightCards.filter(x => x.s !== 'J');
+
         if (requireSameColor) {
-            if (requireSameColor === 'red' && nonJ.some(x => !isRed(x.s))) return false;
-            if (requireSameColor === 'black' && nonJ.some(x => !isBlack(x.s))) return false;
+            if (requireSameColor === 'red' && straightNonJ.some(x => !isRed(x.s))) return false;
+            if (requireSameColor === 'black' && straightNonJ.some(x => !isBlack(x.s))) return false;
         }
 
-          const ranks = nonJ.map(x => x.r);
+          const ranks = straightNonJ.map(x => x.r);
           const uniq = new Set(ranks);
           // 雜龍規則：非鬼牌部分不可有對子 (若有對子則無法構成 9 張連續)
           if (uniq.size !== ranks.length) return false;
@@ -2959,7 +2963,7 @@ function eval3NoJoker(cards) {
           const max14 = Math.max(...ranks);
           const min14 = Math.min(...ranks);
           const need14 = (max14 - min14 + 1) - ranks.length;
-          if (need14 <= jokers) return true;
+          if (need14 <= straightJokers) return true;
 
           // 情況 2: Ace 當作 1 (例如 A,2,3,4,5,6,7,8,9)
           if (ranks.includes(14)) {
@@ -2968,7 +2972,7 @@ function eval3NoJoker(cards) {
             const max1 = Math.max(...ranks1);
             const min1 = Math.min(...ranks1);
             const need1 = (max1 - min1 + 1) - ranks1.length;
-            if (need1 <= jokers) return true;
+            if (need1 <= straightJokers) return true;
           }
 
           return false;
@@ -2982,7 +2986,7 @@ function eval3NoJoker(cards) {
       const eMid = evals?.mid || eval3(mid);
       const eTail = evals?.tail || eval3(tail);
 
-      // 報到：全紅/全黑只以「頭+中+尾」8 張判斷（不含選莊牌），並忽略鬼牌顏色
+      // 報到：全紅/全黑/雜龍/青龍只以「頭+中+尾」8 張判斷（不含選莊牌），並忽略鬼牌顏色
       const eightCards = [...(head || []), ...(mid || []), ...(tail || [])].filter(Boolean);
       const eightNonJ = eightCards.filter(x => x.s !== 'J');
 
@@ -3031,10 +3035,10 @@ function eval3NoJoker(cards) {
       if (c === 'fourKind') ok = canMakeFourKindCount();
       if (c === 'twoFourKind') ok = canMakeTwoFourKind();
       if (c === 'fourPairs') ok = canMakeFourPairs();
-      if (c === 'mixedDragon') ok = canMakeLength9Straight(null);
+      if (c === 'mixedDragon') ok = canMakeLength9Straight(eightCards, null);
       if (c === 'greenDragon') {
         // same color + length 9 straight
-        ok = canMakeLength9Straight('red') || canMakeLength9Straight('black');
+        ok = canMakeLength9Straight(eightCards, 'red') || canMakeLength9Straight(eightCards, 'black');
       }
 
       return {ok, bonus: ok ? (bonusMap[c] || 0) : 0};
