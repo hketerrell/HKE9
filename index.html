@@ -5380,13 +5380,18 @@ function revealRound() {
           updateMyCumulative();
           try { clientState.readyMap = readyMapForBroadcast();
           } catch {}
-          try { renderTableSeats(); playRevealOnTable(payload);
+          let revealPromise = null;
+          try { renderTableSeats(); revealPromise = playRevealOnTable(payload);
           } catch {}
           $('btnOpenLastReveal').classList.remove('hidden');
           updateMidActionButton();
           try { updateMidActionButton();
           } catch {}
-          startNextReadyPhase(payload.players);
+          if (revealPromise && typeof revealPromise.finally === 'function') {
+            revealPromise.finally(() => startNextReadyPhase(payload.players));
+          } else {
+            startNextReadyPhase(payload.players);
+          }
           glog('房主已結算本局');
           try {
             if (persistState.enabled) {
@@ -5486,13 +5491,18 @@ function revealRound() {
         updateMyCumulative();
         try { clientState.readyMap = readyMapForBroadcast();
         } catch {}
-        try { renderTableSeats(); playRevealOnTable(payload);
+        let revealPromise = null;
+        try { renderTableSeats(); revealPromise = playRevealOnTable(payload);
         } catch {}
         $('btnOpenLastReveal').classList.remove('hidden');
         updateMidActionButton();
         try { updateMidActionButton();
         } catch {}
-        startNextReadyPhase(payload.players);
+        if (revealPromise && typeof revealPromise.finally === 'function') {
+          revealPromise.finally(() => startNextReadyPhase(payload.players));
+        } else {
+          startNextReadyPhase(payload.players);
+        }
         glog('房主已結算本局');
         try {
           if (persistState.enabled) {
@@ -5679,12 +5689,17 @@ function revealRound() {
       updateMyCumulative();
       try { clientState.readyMap = readyMapForBroadcast();
       } catch {}
-      try { renderTableSeats(); playRevealOnTable(payload);
+      let revealPromise = null;
+      try { renderTableSeats(); revealPromise = playRevealOnTable(payload);
       } catch {}
 
       $('btnOpenLastReveal').classList.remove('hidden');
       updateMidActionButton();
-      startNextReadyPhase(payload.players);
+      if (revealPromise && typeof revealPromise.finally === 'function') {
+        revealPromise.finally(() => startNextReadyPhase(payload.players));
+      } else {
+        startNextReadyPhase(payload.players);
+      }
       try {
         if (persistState.enabled) {
           maybeSavePersistRecordAfterRound().catch(()=>{});
@@ -6273,7 +6288,7 @@ function revealRound() {
 
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-      (async () => {
+      const run = (async () => {
         let delay = 240; // slow down ~2x
         for (const step of steps) {
           const ui = seatUi[step.pid];
@@ -6290,6 +6305,7 @@ function revealRound() {
           await sleep(240);
         }
       })();
+      return run;
     }
 
     // -------------------- Rendering: game --------------------
