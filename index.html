@@ -4801,7 +4801,8 @@ function eval3NoJoker(cards) {
 
     function startGame() {
       if (!isHost) return;
-      if (!peer || !myId) return;
+      if (!myId) return; 
+      if (!isServerMode() && !peer) return;
       if (Object.keys(hostState.players).length < 1) {
         toast('至少需要 2 人（含房主）才能開始');
         return;
@@ -7046,7 +7047,8 @@ function revealRound() {
 
       const startedAt = Date.now();
       const waitPeer = setInterval(() => {
-        if (!(peer && myId)) return;
+        if (!myId) return; 
+        if (!isServerMode() && !peer) return;
         clearInterval(waitPeer);
 
         let attempts = 0;
