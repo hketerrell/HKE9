@@ -3708,6 +3708,24 @@ function eval3NoJoker(cards) {
       };
     }
 
+    async function savePersistRecordNow(reason = '') {
+      if (!isHost) return;
+      if (!persistState.enabled) return;
+      const rid = persistState.roomId;
+
+      refreshPersistScoresByNameFromCumulative();
+      const record = buildPersistRecordPayload();
+
+      try {
+        localStorage.setItem(persistKey(rid,'record'), JSON.stringify({scoresByName: record.scoresByName}));
+        dlog(`Persist(Local): saved cache for ${rid} (names=${Object.keys(record.scoresByName||{}).length})${reason ? ` | ${reason}` : ''}`);
+      } catch (e) {
+        dlog(`Persist(Local): cache write failed for ${rid}: ${e?.message || e}`);
+      }
+
+      await workerWriteRecord(rid, record);
+    }
+
     async function maybeLoadPersistRecordForHost(roomId) {
       const rid = String(roomId||'').trim().toUpperCase();
       if (!isPersistRoomId(rid)) return;
@@ -3759,6 +3777,50 @@ function eval3NoJoker(cards) {
 
       // Best-effort cloud save via worker
       await workerWriteRecord(rid, record);
+    }
+
+    function resolveLobbyPersistRoomId() {
+      const raw = String(($('inpRoomId')?.value || '')).trim().toUpperCase();
+      if (isPersistRoomId(raw)) return raw;
+      return 'MON';
+    }
+
+    async function persistLobbyRename(prevName, nextName) {
+      const roomId = resolveLobbyPersistRoomId();
+      const now = new Date().toISOString();
+      let record = { roomId, updatedAt: now, scoresByName: {} };
+      try {
+        const cached = localStorage.getItem(persistKey(roomId,'record'));
+        if (cached) {
+          const json = JSON.parse(cached);
+          if (json && typeof json === 'object') {
+            record.scoresByName = json.scoresByName || {};
+          }
+        }
+      } catch {}
+
+      const remote = await githubReadRecord(roomId);
+      if (remote && typeof remote === 'object') {
+        record.scoresByName = remote.scoresByName || record.scoresByName || {};
+      }
+
+      const prev = String(prevName || '').trim();
+      const next = String(nextName || '').trim();
+      if (!next) return;
+      const scores = { ...(record.scoresByName || {}) };
+      if (prev && prev !== next && scores[prev] !== undefined) {
+        scores[next] = Number(scores[prev] || 0);
+        delete scores[prev];
+      } else if (scores[next] === undefined) {
+        scores[next] = 0;
+      }
+      record = { ...record, roomId, updatedAt: now, scoresByName: scores };
+
+      try {
+        localStorage.setItem(persistKey(roomId,'record'), JSON.stringify({scoresByName: record.scoresByName}));
+      } catch {}
+
+      await workerWriteRecord(roomId, record);
     }
 
     function setRoleBadges() {
@@ -4451,7 +4513,7 @@ function eval3NoJoker(cards) {
         try {
           if (persistState.enabled) {
             applyPersistNameChange(prev, next, hostState.cumulative[pid] || 0);
-            maybeSavePersistRecordAfterRound();
+            savePersistRecordNow('rename');
           }
         } catch {}
         broadcastPlayers();
@@ -7369,13 +7431,15 @@ function revealRound() {
           try {
             if (persistState.enabled) {
               applyPersistNameChange(prevName, nextName, hostState.cumulative[hostId] || 0);
-              maybeSavePersistRecordAfterRound();
+              savePersistRecordNow('rename');
             }
           } catch {}
           broadcastPlayers();
           try { renderTableSeats(); } catch {}
         } else if (clientConn && clientState.connected) {
           try { send(clientConn, { t: 'rename', name: nextName }); } catch {}
+        } else if (!persistState.enabled) {
+          try { persistLobbyRename(prevName, nextName); } catch {}
         }
       }
       toast('已儲存暱稱');
