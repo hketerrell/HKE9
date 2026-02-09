@@ -3290,7 +3290,7 @@ function eval3NoJoker(cards) {
     const HEARTBEAT_MS = 8000;
     const HEARTBEAT_TIMEOUT_MS = 30000;
     const HOST_HEARTBEAT_ENABLED = false;
-    const CLIENT_HEARTBEAT_ENABLED = false;
+    const CLIENT_HEARTBEAT_ENABLED = true;
     let hostHeartbeatTimer = null;
     let clientHeartbeatTimer = null;
     let clientReconnectTimer = null;
@@ -3415,8 +3415,10 @@ function eval3NoJoker(cards) {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return;
       tryRelayReconnect();
-      if (!isHost && !clientState.connected && clientState.roomId) {
-        scheduleClientReconnect('resume');
+      if (!isHost && clientState.roomId) {
+        if (!clientState.connected || !relaySocketOpen()) {
+          scheduleClientReconnect('resume');
+        }
       }
     });
 
