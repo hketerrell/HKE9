@@ -18,7 +18,8 @@ function send(ws, payload) {
 function cleanRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
-  if (!room.hostSocket || room.hostSocket.readyState !== room.hostSocket.OPEN) {
+  const hostActive = room.hostSocket && room.hostSocket.readyState === room.hostSocket.OPEN;
+  if (!hostActive && room.clients.size === 0) {
     rooms.delete(roomId);
   }
 }
@@ -53,8 +54,22 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'error', message: 'Room id required.' });
         return;
       }
-      if (rooms.has(roomId)) {
-        send(ws, { t: 'error', message: 'Room already exists.' });
+      const existing = rooms.get(roomId);
+      if (existing) {
+        const hostActive = existing.hostSocket && existing.hostSocket.readyState === ws.OPEN;
+        if (hostActive) {
+          send(ws, { t: 'error', message: 'Room already exists.' });
+          return;
+        }
+        existing.hostId = ws.id;
+        existing.hostName = name || '房主';
+        existing.hostSocket = ws;
+        ws.roomId = roomId;
+        ws.role = 'host';
+        send(ws, { t: 'hosted', roomId, id: ws.id, hostId: ws.id, resumed: true });
+        for (const client of existing.clients.values()) {
+          send(client.socket, { t: 'host-rejoined', roomId, hostId: ws.id });
+        }
         return;
       }
       rooms.set(roomId, {
@@ -74,15 +89,18 @@ wss.on('connection', (ws) => {
       const roomId = String(msg.roomId || '').trim().toUpperCase();
       const name = String(msg.name || '').trim();
       const room = rooms.get(roomId);
-      if (!room || !room.hostSocket || room.hostSocket.readyState !== ws.OPEN) {
+      if (!room) {
         send(ws, { t: 'error', message: 'Room not available.' });
         return;
       }
+      const hostActive = room.hostSocket && room.hostSocket.readyState === ws.OPEN;
       room.clients.set(ws.id, { socket: ws, name: name || '玩家' });
       ws.roomId = roomId;
       ws.role = 'client';
-      send(ws, { t: 'joined', roomId, id: ws.id, hostId: room.hostId });
-      send(room.hostSocket, { t: 'client-joined', id: ws.id, name: name || '玩家' });
+      send(ws, { t: 'joined', roomId, id: ws.id, hostId: hostActive ? room.hostId : null, waiting: !hostActive });
+      if (hostActive) {
+        send(room.hostSocket, { t: 'client-joined', id: ws.id, name: name || '玩家' });
+      }
       return;
     }
 
@@ -116,13 +134,11 @@ wss.on('connection', (ws) => {
     if (!room) return;
 
     if (ws.role === 'host') {
+      room.hostSocket = null;
+      room.hostId = null;
       for (const client of room.clients.values()) {
-        send(client.socket, { t: 'host-left' });
-        try {
-          client.socket.close();
-        } catch {}
+        send(client.socket, { t: 'host-left', roomId });
       }
-      rooms.delete(roomId);
       return;
     }
 
