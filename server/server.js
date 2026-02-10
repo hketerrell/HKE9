@@ -20,6 +20,10 @@ function send(ws, payload) {
   ws.send(JSON.stringify(payload));
 }
 
+function isSocketOpen(ws) {
+  return !!ws && ws.readyState === ws.OPEN;
+}
+
 function cleanRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -233,19 +237,28 @@ wss.on('connection', (ws) => {
     if (msg.t === 'create-room') {
       const roomId = String(msg.roomId || '').trim().toUpperCase();
       const name = String(msg.name || '').trim();
+      const hostToken = String(msg.hostToken || '').trim();
       if (!roomId) {
         send(ws, { t: 'error', message: 'Room id required.' });
         return;
       }
       const existingRoom = rooms.get(roomId);
       if (existingRoom) {
-        if (existingRoom.hostSocket && existingRoom.hostSocket.readyState === ws.OPEN) {
+        const canTakeOver =
+          !!hostToken &&
+          !!existingRoom.hostToken &&
+          existingRoom.hostToken === hostToken;
+        if (isSocketOpen(existingRoom.hostSocket) && !canTakeOver) {
           send(ws, { t: 'error', message: 'Room already exists.' });
           return;
+        }
+        if (canTakeOver && isSocketOpen(existingRoom.hostSocket) && existingRoom.hostSocket !== ws) {
+          try { existingRoom.hostSocket.close(1012, 'Host reconnected'); } catch {}
         }
         existingRoom.hostId = ws.id;
         existingRoom.hostName = name || '房主';
         existingRoom.hostSocket = ws;
+        existingRoom.hostToken = hostToken || existingRoom.hostToken || null;
         ws.roomId = roomId;
         ws.role = 'host';
         send(ws, { t: 'hosted', roomId, id: ws.id, hostId: ws.id });
@@ -260,6 +273,7 @@ wss.on('connection', (ws) => {
         hostId: ws.id,
         hostName: name || '房主',
         hostSocket: ws,
+        hostToken: hostToken || null,
         clients: new Map(),
       });
       ws.roomId = roomId;
