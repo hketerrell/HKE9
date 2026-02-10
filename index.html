@@ -3713,15 +3713,19 @@ function eval3NoJoker(cards) {
 
     function applyPersistScoresToClientCumulative() {
       if (!persistState.enabled) return;
-      const map = {};
+      const map = { ...(clientState.cumulative || {}) };
       if (hostId) {
         const hn = String(clientState.hostName || '').trim();
-        if (hn) map[hostId] = Number(persistState.scoresByName?.[hn] || 0);
+        if (hn && Object.prototype.hasOwnProperty.call(persistState.scoresByName || {}, hn)) {
+          map[hostId] = Number(persistState.scoresByName?.[hn] || 0);
+        }
       }
       for (const pid in (clientState.players || {})) {
         const nm = String(clientState.players[pid]?.name || '').trim();
         if (!nm) continue;
-        map[pid] = Number(persistState.scoresByName?.[nm] || 0);
+        if (Object.prototype.hasOwnProperty.call(persistState.scoresByName || {}, nm)) {
+          map[pid] = Number(persistState.scoresByName?.[nm] || 0);
+        }
       }
       clientState.cumulative = map;
     }
@@ -3873,15 +3877,21 @@ function eval3NoJoker(cards) {
       const roundNum = Number(msg?.round || 0);
       if (roundNum > 0 && persistState.lastSavedRound >= roundNum) return;
 
+      const cumulative = (msg && typeof msg.cumulative === 'object' && msg.cumulative)
+        ? msg.cumulative
+        : (clientState.cumulative || {});
       const merged = { ...(persistState.scoresByName || {}) };
       if (hostId) {
         const hostNm = String(clientState.hostName || '').trim();
-        if (hostNm) merged[hostNm] = Number(clientState.cumulative?.[hostId] || 0);
+        if (hostNm && Object.prototype.hasOwnProperty.call(cumulative, hostId)) {
+          merged[hostNm] = Number(cumulative[hostId] || 0);
+        }
       }
       for (const pid in (clientState.players || {})) {
         const nm = String(clientState.players[pid]?.name || '').trim();
         if (!nm) continue;
-        merged[nm] = Number(clientState.cumulative?.[pid] || 0);
+        if (!Object.prototype.hasOwnProperty.call(cumulative, pid)) continue;
+        merged[nm] = Number(cumulative[pid] || 0);
       }
       persistState.scoresByName = merged;
 
