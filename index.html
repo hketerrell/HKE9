@@ -2013,7 +2013,7 @@
       // For players, ensure connected before showing locally (avoid "sent but not actually sent")
       if (!isHost) {
         if (!clientConn || !clientState.connected) {
-          toast('尚未連線到房主');
+          toast('尚未連線到 SERVER');
           return;
         }
       }
@@ -2042,7 +2042,7 @@
 
       if (!isHost) {
         if (!clientConn || !clientState.connected) {
-          toast('尚未連線到房主');
+          toast('尚未連線到 SERVER');
           return;
         }
       }
@@ -2266,7 +2266,7 @@
       // must be connected if player
       if (!isHost) {
         if (!clientConn || !clientState.connected) {
-          toast('尚未連線到房主');
+          toast('尚未連線到 SERVER');
           return;
         }
       }
@@ -2362,7 +2362,7 @@
       // must be connected if player
       if (!isHost) {
         if (!clientConn || !clientState.connected) {
-          toast('尚未連線到房主');
+          toast('尚未連線到 SERVER');
           return;
         }
       }
@@ -3186,14 +3186,7 @@ function eval3NoJoker(cards) {
         relayConnecting = false;
         if (!relaySocketOpen()) return;
         if (!relayIntent) return;
-        if (relayIntent.type === 'host') {
-          relaySocket.send(JSON.stringify({
-            t: 'create-room',
-            roomId: relayIntent.roomId,
-            name: clientState.myName,
-            hostToken: resolveHostToken(relayIntent.roomId),
-          }));
-        } else if (relayIntent.type === 'join') {
+        if (relayIntent.type === 'host' || relayIntent.type === 'join') {
           relaySocket.send(JSON.stringify({ t: 'join-room', roomId: relayIntent.roomId, name: clientState.myName }));
         }
       });
@@ -4686,7 +4679,7 @@ function eval3NoJoker(cards) {
         clientState.settings = msg.settings || clientState.settings;
         $('inpRounds').value = clientState.settings.roundsTotal;
         try { $('chkBBMode').checked = !!clientState.settings.bbMode; } catch {}
-        log(`設定更新：局數 ${clientState.settings.roundsTotal}｜BB模式 ${clientState.settings.bbMode ? 'ON' : 'OFF'}`);
+        log(`設定更新：局數 ${Number(clientState.settings.roundsTotal||0) > 0 ? clientState.settings.roundsTotal : '∞'}｜BB模式 ${clientState.settings.bbMode ? 'ON' : 'OFF'}`);
         return;
       }
 
@@ -4697,9 +4690,9 @@ function eval3NoJoker(cards) {
         clientState.settings = msg.settings || clientState.settings;
         clientState.cumulative = msg.cumulative || clientState.cumulative || {};
         $('gameRoomId').textContent = clientState.roomId || '—';
-        $('gameRoundInfo').textContent = `${clientState.round} / ${clientState.settings.roundsTotal}`;
+        $('gameRoundInfo').textContent = `${clientState.round} / ${Number(clientState.settings.roundsTotal||0) > 0 ? clientState.settings.roundsTotal : '∞'}`;
         // chat log hides system messages; use toast instead
-        toast(`遊戲開始（共 ${clientState.settings.roundsTotal} 局）`);
+        toast(`遊戲開始（共 ${Number(clientState.settings.roundsTotal||0) > 0 ? clientState.settings.roundsTotal : '∞'} 局）`);
         updateMyCumulative();
         try { renderTableSeats(); } catch {}
         return;
@@ -4805,8 +4798,8 @@ function eval3NoJoker(cards) {
         $('btnOpenLastReveal').classList.remove('hidden');
 
         // If this is the final round, delay gameOver modal until user checks/finishes this round
-        const roundsTotal = clientState.settings.roundsTotal;
-        if (Number(msg.round) >= Number(roundsTotal)) {
+        const roundsTotal = Number(clientState.settings.roundsTotal || 0);
+        if (roundsTotal > 0 && Number(msg.round) >= roundsTotal) {
           clientState.pendingGameOver = {
             roomId: clientState.roomId,
             players: msg.players || [],
@@ -4845,7 +4838,7 @@ function eval3NoJoker(cards) {
       if (msg.t === 'waitNextRound') {
         // Informational: joined between rounds; wait for next deal.
         const r = Number(msg.round || 0);
-        toast(r ? `已加入房間，請等待房主開始第 ${r+1} 局` : '已加入房間，請等待房主開始下一局');
+        toast(r ? `已加入房間，請等待所有玩家準備開始第 ${r+1} 局` : '已加入房間，請等待所有玩家準備開始下一局');
         try { showPage('game'); renderTableSeats(); } catch {}
         return;
       }
@@ -5605,26 +5598,37 @@ async function revealRound() {
             }
           }
       } else {
-          // 情況 B: 正常狀態 (HKE九張 / 開始)
-          centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition';
-          centerBtn.textContent = (!started && isHost) ? '開始' : 'HKE九張';
-          
-          centerBtn.addEventListener('click', () => {
-             // ...保留原本的點擊邏輯...
-             const hasDealt = (clientState.cards9 && clientState.cards9.length);
-             const started2 = (isHost ? (hostState.round > 0) : (clientState.round > 0));
+          const hasDealt = (clientState.cards9 && clientState.cards9.length);
+          const started2 = (isHost ? (hostState.round > 0) : (clientState.round > 0));
 
-             if (!started2 && !hasDealt) {
-               if (isHost) startGame();
-               else toast('等待房主開始遊戲');
-               return;
-             }
-             if (!hasDealt) {
-               toast('等待房主發牌');
-               return;
-             }
-             openArrangeModal();
-          });
+          centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition';
+
+          if (!started2 && !hasDealt && !isHost) {
+            const selfReady = !!(clientState.readyMap || {})[myId];
+            centerBtn.textContent = selfReady ? '取消準備' : '準備';
+            centerBtn.onclick = () => {
+              if (!clientConn) return;
+              const nextReady = !selfReady;
+              clientState.readyMap = { ...(clientState.readyMap || {}), [myId]: nextReady };
+              send(clientConn, { t: 'preReady', ready: nextReady });
+              renderReadyList(clientState.readyMap || null);
+              renderTableSeats();
+            };
+          } else {
+            centerBtn.textContent = (!started2 && isHost) ? '開始' : 'HKE九張';
+            centerBtn.addEventListener('click', () => {
+               if (!started2 && !hasDealt) {
+                 if (isHost) startGame();
+                 else toast('等待所有玩家準備');
+                 return;
+               }
+               if (!hasDealt) {
+                 toast('等待 SERVER 發牌');
+                 return;
+               }
+               openArrangeModal();
+            });
+          }
       }
 
       root.appendChild(centerBtn);
@@ -6494,8 +6498,9 @@ async function revealRound() {
       const roundOver = roundOverForUi();
       const fallbackMap = isHost ? readyMapForBroadcast() : (clientState.readyMap || {});
       const rmap = roundOver ? (nextReadyMapForUi() || {}) : (readyMap || fallbackMap || null);
-      const onLabel = roundOver ? '已準備' : '已提交';
-      const offLabel = roundOver ? '未準備' : '未提交';
+      const started = (isHost ? (hostState.round > 0) : (clientState.round > 0));
+      const onLabel = roundOver ? '已準備' : (started ? '已提交' : '已準備');
+      const offLabel = roundOver ? '未準備' : (started ? '未提交' : '未準備');
 
       let players = [];
       if (isHost) {
@@ -6867,7 +6872,7 @@ async function revealRound() {
       }
 
       if (!clientState.connected || !clientState.roomId || !clientConn) {
-        toast('尚未連線到房主');
+        toast('尚未連線到 SERVER');
         return;
       }
 
@@ -6904,10 +6909,6 @@ async function revealRound() {
     }
 
     function becomeHost() {
-      ensureName();
-      isHost = true;
-      hostId = null;
-
       let custom = ($('inpCustomRoomId')?.value || '').trim();
       if (!custom) custom = generateRoomId();
       const ok = /^[a-zA-Z0-9_-]{3,32}$/.test(custom);
@@ -6915,13 +6916,7 @@ async function revealRound() {
         toast('自訂房間號格式不正確：請用 3～32 字的英數/底線/減號');
         return;
       }
-      hostRoomId = custom.toUpperCase();
-      clientState.roomId = hostRoomId;
-
-      setBadge(false, '建立中…');
-      connectRelay({ type: 'host', roomId: hostRoomId });
-      setRoleBadges();
-      log(`正在建立房間：${hostRoomId} …`);
+      joinRoom(custom.toUpperCase());
     }
 
     function joinRoom(roomId) {
@@ -6968,7 +6963,7 @@ async function revealRound() {
       setTimeout(() => {
         if (clientState.connected || !clientState.joining) return;
         clientState.joining = false;
-        toast('加入房間逾時：請確認房主已建立房間且網路可用');
+        toast('加入房間逾時：請確認 SERVER 連線正常且房間號正確');
         setBadge(false, '逾時');
       }, 14000);
     }
@@ -7253,7 +7248,7 @@ async function revealRound() {
 
       // Controller (player) sends choice to host
       if (!clientConn || !clientState.connected) {
-        toast('尚未連線到房主');
+        toast('尚未連線到 SERVER');
         return;
       }
       send(clientConn, {
@@ -7300,7 +7295,7 @@ async function revealRound() {
       } else {
         // player: request host
         if (!clientConn || !clientState.connected) {
-          toast('尚未連線到房主');
+          toast('尚未連線到 SERVER');
           return;
         }
         send(clientConn, {t:'restartRequest'});
