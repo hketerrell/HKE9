@@ -6,6 +6,7 @@ const path = require('path');
 const { computeRoundResult } = require('./score');
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const SERVER_HOST_ID = 'SERVER';
 
 const rooms = new Map();
 const recordsDir = path.resolve(__dirname, '..', 'records');
@@ -20,15 +21,10 @@ function send(ws, payload) {
   ws.send(JSON.stringify(payload));
 }
 
-function isSocketOpen(ws) {
-  return !!ws && ws.readyState === ws.OPEN;
-}
-
 function cleanRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const hostGone = !room.hostSocket || room.hostSocket.readyState !== room.hostSocket.OPEN;
-  if (hostGone && room.clients.size === 0) {
+  if (room.clients.size === 0) {
     rooms.delete(roomId);
   }
 }
@@ -193,9 +189,194 @@ const server = http.createServer(async (req, res) => {
   res.end('HKE9 relay server running');
 });
 
+function makeDeck54() {
+  const deck = [];
+  const suits = ['S', 'H', 'D', 'C'];
+  for (const s of suits) {
+    for (let r = 2; r <= 14; r += 1) deck.push({ r, s });
+  }
+  deck.push({ r: 16, s: 'J', j: 'BJ' });
+  deck.push({ r: 15, s: 'J', j: 'SJ' });
+  return deck;
+}
+
+function shuffle(arr) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function cardKey(c) {
+  if (!c) return '';
+  if (c.s === 'J') return c.j;
+  return `${c.r}${c.s}`;
+}
+
+function normalizeCard(c) {
+  if (!c || typeof c !== 'object') return null;
+  if (c.s === 'J') {
+    if (c.j !== 'BJ' && c.j !== 'SJ') return null;
+    return { s: 'J', j: c.j, r: c.j === 'BJ' ? 16 : 15 };
+  }
+  const r = Number(c.r);
+  const s = String(c.s || '');
+  if (!Number.isInteger(r) || r < 2 || r > 14) return null;
+  if (!['S', 'H', 'D', 'C'].includes(s)) return null;
+  return { r, s };
+}
+
+function validateSubmission(cards9, sub) {
+  if (!cards9 || cards9.length !== 9) return { ok: false, msg: '尚未發牌' };
+  const dealerCard = normalizeCard(sub?.dealerCard);
+  const head = (sub?.head || []).map(normalizeCard);
+  const mid = (sub?.mid || []).map(normalizeCard);
+  const tail = (sub?.tail || []).map(normalizeCard);
+  if (!dealerCard) return { ok: false, msg: '請選擇選莊牌' };
+  if (head.length !== 2 || mid.length !== 3 || tail.length !== 3) return { ok: false, msg: '牌組長度不符' };
+  if ([...head, ...mid, ...tail].some((c) => !c)) return { ok: false, msg: '墩位有空牌' };
+
+  const dealt = new Set(cards9.map(cardKey));
+  const used = [dealerCard, ...head, ...mid, ...tail].map(cardKey);
+  if (new Set(used).size !== used.length) return { ok: false, msg: '提交存在重複牌' };
+  for (const k of used) {
+    if (!dealt.has(k)) return { ok: false, msg: '提交的牌不在手牌中' };
+  }
+  return { ok: true, data: { dealerCard, head, mid, tail } };
+}
+
+function getRoom(roomId) {
+  const id = String(roomId || '').trim().toUpperCase();
+  if (!id) return null;
+  if (!rooms.has(id)) {
+    rooms.set(id, {
+      roomId: id,
+      clients: new Map(),
+      seatOrder: [],
+      cumulative: {},
+      settings: { roundsTotal: 0, bbMode: false },
+      round: 0,
+      started: false,
+      dealt: {},
+      submissions: {},
+      revealed: false,
+      nextReadyMap: {},
+      preStartReadyMap: {},
+    });
+  }
+  return rooms.get(id);
+}
+
+function roomPlayers(room) {
+  const out = [];
+  for (const id of room.seatOrder) {
+    const p = room.clients.get(id);
+    if (p) out.push({ id, name: p.name || '玩家' });
+  }
+  for (const [id, p] of room.clients.entries()) {
+    if (!out.find((x) => x.id === id)) out.push({ id, name: p.name || '玩家' });
+  }
+  return out;
+}
+
+function relayToRoom(room, payload, exceptId = null) {
+  for (const [id, p] of room.clients.entries()) {
+    if (id === exceptId) continue;
+    send(p.socket, { t: 'relay', fromId: SERVER_HOST_ID, payload });
+  }
+}
+
+function broadcastPlayers(room) {
+  relayToRoom(room, { t: 'players', list: roomPlayers(room), hostId: SERVER_HOST_ID, hostName: 'SERVER', seatOrder: room.seatOrder.slice() });
+}
+
+function dealRound(room) {
+  const ids = room.seatOrder.filter((id) => room.clients.has(id));
+  if (ids.length === 0) return;
+  room.round += 1;
+  room.started = true;
+  room.revealed = false;
+  room.dealt = {};
+  room.submissions = {};
+  room.nextReadyMap = {};
+
+  for (const id of ids) room.preStartReadyMap[id] = false;
+
+  const deck = shuffle(makeDeck54());
+  for (const id of ids) {
+    room.dealt[id] = { all9: deck.splice(0, 9) };
+  }
+
+  relayToRoom(room, { t: 'start', round: room.round, settings: room.settings, cumulative: room.cumulative });
+  const ready = {};
+  for (const id of ids) ready[id] = false;
+  for (const id of ids) {
+    const p = room.clients.get(id);
+    if (!p) continue;
+    send(p.socket, {
+      t: 'relay',
+      fromId: SERVER_HOST_ID,
+      payload: { t: 'deal', round: room.round, cards9: room.dealt[id].all9, ready },
+    });
+  }
+}
+
+function maybeStartNextRound(room) {
+  const ids = room.seatOrder.filter((id) => room.clients.has(id));
+  if (ids.length === 0) return;
+  if (!room.started) {
+    const allPreReady = ids.length > 0 && ids.every((id) => !!room.preStartReadyMap[id]);
+    if (!allPreReady) return;
+    dealRound(room);
+    return;
+  }
+  if (!room.revealed) return;
+  const allReady = ids.every((id) => room.nextReadyMap[id]);
+  if (!allReady) return;
+  relayToRoom(room, { t: 'nextRound', round: room.round + 1 });
+  dealRound(room);
+}
+
+function resolveReveal(room) {
+  const subs = room.submissions;
+  const ids = room.seatOrder.filter((id) => room.clients.has(id));
+  if (!ids.length) return;
+  if (!ids.every((id) => !!subs[id])) return;
+
+  let scoreData;
+  try {
+    scoreData = computeRoundResult({ submissions: subs, dealerOverride: null });
+  } catch (error) {
+    relayToRoom(room, { t: 'error', message: error.message || '結算失敗' });
+    return;
+  }
+
+  const dealerId = scoreData.dealerId;
+  for (const id of ids) {
+    room.cumulative[id] = Number(room.cumulative[id] || 0) + Number(scoreData.results[id] || 0);
+  }
+
+  room.revealed = true;
+  room.nextReadyMap = {};
+  for (const id of ids) room.nextReadyMap[id] = false;
+
+  relayToRoom(room, {
+    t: 'reveal',
+    round: room.round,
+    dealerId,
+    results: scoreData.results,
+    cumulative: room.cumulative,
+    submissions: subs,
+    players: roomPlayers(room),
+  });
+
+  relayToRoom(room, { t: 'nextReady', ready: room.nextReadyMap, round: room.round });
+}
+
 const wss = new WebSocketServer({ server });
 const HEARTBEAT_INTERVAL_MS = 15000;
-const HOST_RECONNECT_GRACE_MS = 60000;
 
 function markAlive(ws) {
   ws.isAlive = true;
@@ -219,7 +400,6 @@ wss.on('close', () => {
 wss.on('connection', (ws) => {
   ws.id = makeId();
   ws.roomId = null;
-  ws.role = null;
   ws.isAlive = true;
 
   ws.on('pong', () => markAlive(ws));
@@ -235,107 +415,106 @@ wss.on('connection', (ws) => {
 
     if (!msg || typeof msg !== 'object') return;
 
-    if (msg.t === 'create-room') {
+    if (msg.t === 'create-room' || msg.t === 'join-room') {
       const roomId = String(msg.roomId || '').trim().toUpperCase();
-      const name = String(msg.name || '').trim();
-      const hostToken = String(msg.hostToken || '').trim();
       if (!roomId) {
         send(ws, { t: 'error', message: 'Room id required.' });
         return;
       }
-      const existingRoom = rooms.get(roomId);
-      if (existingRoom) {
-        if (existingRoom.hostDisconnectTimer) {
-          clearTimeout(existingRoom.hostDisconnectTimer);
-          existingRoom.hostDisconnectTimer = null;
-        }
-        const canTakeOver =
-          !!hostToken &&
-          !!existingRoom.hostToken &&
-          existingRoom.hostToken === hostToken;
-        if (isSocketOpen(existingRoom.hostSocket) && !canTakeOver) {
-          send(ws, { t: 'error', message: 'Room already exists.' });
-          return;
-        }
-        if (canTakeOver && isSocketOpen(existingRoom.hostSocket) && existingRoom.hostSocket !== ws) {
-          try { existingRoom.hostSocket.close(1012, 'Host reconnected'); } catch {}
-        }
-        existingRoom.hostId = ws.id;
-        existingRoom.hostName = name || '房主';
-        existingRoom.hostSocket = ws;
-        existingRoom.hostToken = hostToken || existingRoom.hostToken || null;
-        ws.roomId = roomId;
-        ws.role = 'host';
-        send(ws, { t: 'hosted', roomId, id: ws.id, hostId: ws.id });
-        for (const [id, client] of existingRoom.clients.entries()) {
-          send(client.socket, { t: 'host-reconnected', hostId: ws.id, hostName: existingRoom.hostName });
-          send(ws, { t: 'client-joined', id, name: client.name });
-        }
-        return;
-      }
-      rooms.set(roomId, {
-        roomId,
-        hostId: ws.id,
-        hostName: name || '房主',
-        hostSocket: ws,
-        hostToken: hostToken || null,
-        hostDisconnectTimer: null,
-        clients: new Map(),
-      });
+      const room = getRoom(roomId);
       ws.roomId = roomId;
-      ws.role = 'host';
-      send(ws, { t: 'hosted', roomId, id: ws.id, hostId: ws.id });
-      return;
-    }
+      room.clients.set(ws.id, { socket: ws, name: String(msg.name || '玩家').trim() || '玩家' });
+      if (!room.seatOrder.includes(ws.id)) room.seatOrder.push(ws.id);
+      room.preStartReadyMap[ws.id] = false;
 
-    if (msg.t === 'join-room') {
-      const roomId = String(msg.roomId || '').trim().toUpperCase();
-      const name = String(msg.name || '').trim();
-      const room = rooms.get(roomId);
-      if (!room) {
-        send(ws, { t: 'error', message: 'Room not available.' });
-        return;
+      send(ws, { t: 'joined', roomId, id: ws.id, hostId: SERVER_HOST_ID });
+      send(ws, {
+        t: 'relay',
+        fromId: SERVER_HOST_ID,
+        payload: {
+          t: 'welcome',
+          hostId: SERVER_HOST_ID,
+          hostName: 'SERVER',
+          seatOrder: room.seatOrder.slice(),
+          settings: room.settings,
+          cumulative: room.cumulative,
+        },
+      });
+
+      broadcastPlayers(room);
+
+      if (!room.started) {
+        const ready = {};
+        for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
+        relayToRoom(room, { t: 'ready', ready });
       }
-      room.clients.set(ws.id, { socket: ws, name: name || '玩家' });
-      ws.roomId = roomId;
-      ws.role = 'client';
-      send(ws, { t: 'joined', roomId, id: ws.id, hostId: room.hostId });
-      if (room.hostSocket && room.hostSocket.readyState === ws.OPEN) {
-        send(room.hostSocket, { t: 'client-joined', id: ws.id, name: name || '玩家' });
+
+      if (room.started && !room.revealed && room.dealt[ws.id]) {
+        const ready = {};
+        for (const id of room.seatOrder) ready[id] = !!room.submissions[id];
+        send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'deal', round: room.round, cards9: room.dealt[ws.id].all9, ready, resume: true } });
       }
+      if (room.revealed) {
+        send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'waitNextRound', round: room.round } });
+      }
+
+      maybeStartNextRound(room);
       return;
     }
 
     if (msg.t === 'relay') {
-      const payload = msg.payload;
-      const to = String(msg.to || '').trim();
-      const roomId = ws.roomId;
-      if (!roomId) return;
-      const room = rooms.get(roomId);
+      const room = rooms.get(ws.roomId);
       if (!room) return;
+      const payload = msg.payload || {};
 
-      if (to === '*') {
-        for (const [id, client] of room.clients.entries()) {
-          if (id === ws.id) continue;
-          send(client.socket, { t: 'relay', fromId: ws.id, payload });
-        }
-        if (ws.role !== 'host' && room.hostSocket && room.hostSocket.readyState === ws.OPEN) {
-          send(room.hostSocket, { t: 'relay', fromId: ws.id, payload });
-        }
+      if (payload.t === 'join') {
+        const p = room.clients.get(ws.id);
+        if (p) p.name = String(payload.name || p.name || '玩家').trim() || '玩家';
+        broadcastPlayers(room);
         return;
       }
 
-      if (ws.role === 'host') {
-        if (!to) return;
-        const target = room.clients.get(to);
-        if (!target) return;
-        send(target.socket, { t: 'relay', fromId: ws.id, payload });
+
+      if (payload.t === 'preReady') {
+        if (room.started) return;
+        room.preStartReadyMap[ws.id] = !!payload.ready;
+        const ready = {};
+        for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
+        relayToRoom(room, { t: 'ready', ready });
+        maybeStartNextRound(room);
         return;
       }
 
-      if (ws.role === 'client') {
-        if (!room.hostSocket || room.hostSocket.readyState !== ws.OPEN) return;
-        send(room.hostSocket, { t: 'relay', fromId: ws.id, payload });
+      if (payload.t === 'submit') {
+        const dealt = room.dealt[ws.id]?.all9;
+        const ok = validateSubmission(dealt, payload);
+        if (!ok.ok) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'error', message: ok.msg } });
+          return;
+        }
+        room.submissions[ws.id] = { ...ok.data, report: String(payload.report || 'none') };
+
+        const ready = {};
+        for (const id of room.seatOrder) ready[id] = !!room.submissions[id];
+        relayToRoom(room, { t: 'ready', ready });
+        resolveReveal(room);
+        return;
+      }
+
+      if (payload.t === 'nextReady') {
+        if (!room.revealed) return;
+        const round = Number(payload.round || 0);
+        if (round && round !== room.round) return;
+        if (room.nextReadyMap[ws.id] === undefined) return;
+        room.nextReadyMap[ws.id] = true;
+        relayToRoom(room, { t: 'nextReady', ready: room.nextReadyMap, round: room.round });
+        maybeStartNextRound(room);
+        return;
+      }
+
+      if (payload.t === 'chat' || payload.t === 'danmaku' || payload.t === 'poop') {
+        const p = room.clients.get(ws.id);
+        relayToRoom(room, { ...payload, fromId: ws.id, from: p?.name || '玩家' });
       }
     }
   });
@@ -346,32 +525,22 @@ wss.on('connection', (ws) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    if (ws.role === 'host') {
-      room.hostSocket = null;
-      room.hostId = null;
-      if (room.hostDisconnectTimer) {
-        clearTimeout(room.hostDisconnectTimer);
-      }
-      room.hostDisconnectTimer = setTimeout(() => {
-        room.hostDisconnectTimer = null;
-        const latestRoom = rooms.get(roomId);
-        if (!latestRoom || latestRoom.hostSocket) return;
-        for (const client of latestRoom.clients.values()) {
-          send(client.socket, { t: 'host-left' });
-        }
-        cleanRoom(roomId);
-      }, HOST_RECONNECT_GRACE_MS);
-      cleanRoom(roomId);
-      return;
-    }
+    room.clients.delete(ws.id);
+    room.seatOrder = room.seatOrder.filter((id) => id !== ws.id);
+    delete room.dealt[ws.id];
+    delete room.submissions[ws.id];
+    delete room.nextReadyMap[ws.id];
+    delete room.preStartReadyMap[ws.id];
+    delete room.cumulative[ws.id];
 
-    if (ws.role === 'client') {
-      room.clients.delete(ws.id);
-      if (room.hostSocket && room.hostSocket.readyState === ws.OPEN) {
-        send(room.hostSocket, { t: 'client-left', id: ws.id });
-      }
-      cleanRoom(roomId);
+    broadcastPlayers(room);
+    if (!room.started) {
+      const ready = {};
+      for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
+      relayToRoom(room, { t: 'ready', ready });
     }
+    maybeStartNextRound(room);
+    cleanRoom(roomId);
   });
 });
 
