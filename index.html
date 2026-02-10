@@ -3354,6 +3354,8 @@ function eval3NoJoker(cards) {
         clientState.joining = false;
         stopClientHeartbeat();
         setBadge(false, '等待房主重連');
+        try { updateMidActionButton(); } catch {}
+        try { renderTableSeats(); } catch {}
         return;
       }
 
@@ -3370,6 +3372,8 @@ function eval3NoJoker(cards) {
         wireConn(clientConn, false);
         clientConn.emit('open');
         setBadge(false, '房主已重新連線');
+        try { updateMidActionButton(); } catch {}
+        try { renderTableSeats(); } catch {}
         return;
       }
 
@@ -3592,6 +3596,7 @@ function eval3NoJoker(cards) {
       cumulative: {}, // peerId -> total
       dealerPick: null, // {controllerId, kind:'BJ'|'SJ', startedAt}
       dealerOverride: null, // dealerId chosen during dealer pick phase
+      lastReveal: null,
     };
 
     // Client state
@@ -4005,6 +4010,7 @@ function eval3NoJoker(cards) {
       hostState.dealt = {};
       hostState.submissions = {};
       hostState.revealed = false;
+      hostState.lastReveal = null;
       hostState.nextReadyMap = {};
       hostState.cumulative = {};
 
@@ -4301,6 +4307,8 @@ function eval3NoJoker(cards) {
           // start heartbeat after connected
           startClientHeartbeat();
           send(conn, {t:'join', name: clientState.myName});
+          try { updateMidActionButton(); } catch {}
+          try { renderTableSeats(); } catch {}
         }
       });
 
@@ -4327,6 +4335,8 @@ function eval3NoJoker(cards) {
           clientState.joining = false;
           stopClientHeartbeat();
           setBadge(false, '連線失敗');
+          try { updateMidActionButton(); } catch {}
+          try { renderTableSeats(); } catch {}
           log(`連線錯誤：${type}`);
           if (wasConnected && !clientState.waitingForHost) {
             toast('連線中斷，嘗試自動重連…');
@@ -4358,6 +4368,8 @@ function eval3NoJoker(cards) {
           clientState.joining = false;
           stopClientHeartbeat();
           setBadge(false, '已斷線');
+          try { updateMidActionButton(); } catch {}
+          try { renderTableSeats(); } catch {}
           log('與房主連線已關閉');
           if (wasJoining) {
             toast('連線被關閉：可能房主不在線/房號錯誤，或 ICE 無法打通（跨網/NAT 請測試 TURN）');
@@ -4586,10 +4598,11 @@ function eval3NoJoker(cards) {
           }
         } catch {}
 
-        // If game already finished this round but not started next, tell the player to wait.
+        // If this is a re-join after reveal, re-send reveal snapshot + nextReady state.
         try {
-          if (!roundInProgress && hostState.round > 0 && hostState.revealed && !hostState.dealt?.[pid]) {
-            send(conn, {t:'waitNextRound', round: hostState.round});
+          if (!roundInProgress && hostState.round > 0 && hostState.revealed && hostState.lastReveal) {
+            send(conn, hostState.lastReveal);
+            send(conn, {t:'nextReady', ready: hostState.nextReadyMap || {}, round: hostState.round});
           }
         } catch {}
 
@@ -5379,6 +5392,7 @@ function eval3NoJoker(cards) {
       }
       hostState.round += 1;
       hostState.revealed = false;
+      hostState.lastReveal = null;
       clientState.keepRevealOnTable = false;
       clientState.revealTableRendered = false;
       updateMidActionButton();
@@ -5555,6 +5569,7 @@ async function revealRound() {
         cumulative: hostState.cumulative,
       };
       hostState.revealed = true;
+      hostState.lastReveal = payload;
       broadcast(payload);
 
       clientState.lastReveal = payload;
@@ -5760,6 +5775,19 @@ async function revealRound() {
       const centerBtn = document.createElement('button');
       centerBtn.type = 'button';
       centerBtn.id = 'btnOpenActionMenu';
+
+      const disconnectedClient = !isHost && !!clientState.roomId && !clientState.connected;
+      if (disconnectedClient) {
+          centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-slate-950 text-sm font-black bg-gradient-to-b from-amber-400 to-amber-500 hover:brightness-110 active:scale-[0.99] transition';
+          centerBtn.textContent = '重連';
+          centerBtn.onclick = () => {
+            const rid = String(clientState.roomId || '').trim();
+            if (!rid) return;
+            joinRoom(rid);
+          };
+          root.appendChild(centerBtn);
+          return;
+      }
       
       // 判斷是否處於「已結算/已比牌」狀態
       // 房主看 hostState.revealed，玩家看 clientState.lastReveal
@@ -6674,6 +6702,13 @@ async function revealRound() {
       const btn = $('btnMidAction');
       if (!btn) return;
 
+      const disconnectedClient = !isHost && !!clientState.roomId && !clientState.connected;
+      if (disconnectedClient) {
+        btn.textContent = '重連';
+        btn.className = 'flex-1 text-xs px-3 py-2 rounded-xl border bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-semibold border-amber-200/30';
+        return;
+      }
+
       const hostReveal = isHost && roundOverForUi();
       const hostReady = isHost && !!hostState.nextReadyMap?.[hostId];
       const hostCanNext = isHost && hostReveal && allNextReady();
@@ -7419,6 +7454,10 @@ async function revealRound() {
     });
     $('btnOpenLog').addEventListener('click', openLogModal);
     $('btnMidAction').addEventListener('click', () => {
+      if (!isHost && clientState.roomId && !clientState.connected) {
+        joinRoom(clientState.roomId);
+        return;
+      }
       // Host: after reveal -> next round. Otherwise: open Arrange (牌組)
       if (isHost && hostState.revealed) {
         if (!hostState.nextReadyMap?.[hostId]) {
