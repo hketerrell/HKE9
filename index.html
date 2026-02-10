@@ -3263,7 +3263,9 @@ function eval3NoJoker(cards) {
       }
 
       if (msg.t === 'hosted') {
-        const wasHost = isHost && hostRoomId;
+        // NOTE: becomeHost() sets isHost/hostRoomId before the first hosted ack.
+        // We only preserve state when we were already an established host session.
+        const wasHost = !!(isHost && hostRoomId && hostId);
         const prevHostId = hostId;
         hostRoomId = msg.roomId;
         clientState.roomId = msg.roomId;
