@@ -3100,6 +3100,26 @@ function eval3NoJoker(cards) {
     let myId = null;
     const relayConnections = new Map();
 
+    function hostTokenKey(roomId) {
+      return `ninePokerHostToken_${String(roomId || '').trim().toUpperCase()}`;
+    }
+
+    function resolveHostToken(roomId) {
+      const rid = String(roomId || '').trim().toUpperCase();
+      if (!rid) return '';
+      try {
+        const key = hostTokenKey(rid);
+        let token = localStorage.getItem(key);
+        if (!token) {
+          token = `${rid}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+          localStorage.setItem(key, token);
+        }
+        return token;
+      } catch {
+        return `${rid}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+      }
+    }
+
     class RelayConnection {
       constructor(peerId, sendFn) {
         this.peer = peerId;
@@ -3184,7 +3204,12 @@ function eval3NoJoker(cards) {
         if (!relaySocketOpen()) return;
         if (!relayIntent) return;
         if (relayIntent.type === 'host') {
-          relaySocket.send(JSON.stringify({ t: 'create-room', roomId: relayIntent.roomId, name: clientState.myName }));
+          relaySocket.send(JSON.stringify({
+            t: 'create-room',
+            roomId: relayIntent.roomId,
+            name: clientState.myName,
+            hostToken: resolveHostToken(relayIntent.roomId),
+          }));
         } else if (relayIntent.type === 'join') {
           relaySocket.send(JSON.stringify({ t: 'join-room', roomId: relayIntent.roomId, name: clientState.myName }));
         }
