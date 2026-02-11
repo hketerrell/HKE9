@@ -513,6 +513,7 @@
           <div class="text-xs text-emerald-100/70">房主按「再來一局」會立即重開；玩家按「再來一局」會向房主提出請求。</div>
           <div class="flex items-center gap-2">
             <button id="btnRestart" class="px-4 py-2 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-black hover:brightness-105 glow-pulse">再來一局</button>
+            <span id="gameOverRoundText" class="text-xs px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-emerald-100/80">第 — 局</span>
             <button id="btnExitRoom" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">離開房間</button>
           </div>
         </div>
@@ -2678,6 +2679,8 @@
     function openGameOverModal(payload) {
       if (!payload) return;
       $('gameOverRoom').textContent = payload.roomId || (isHost ? (myId||'—') : (clientState.roomId||'—'));
+      const currentRound = Number(payload.round || clientState.round || 0);
+      $('gameOverRoundText').textContent = currentRound > 0 ? `第 ${currentRound} 局` : '第 — 局';
 
       const body = $('gameOverBody');
       body.innerHTML = '';
