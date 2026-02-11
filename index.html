@@ -438,12 +438,12 @@
       <!-- 1. 外層修改：left-1/2 -translate-x-1/2 (置中) 以及 w-3/4 (75%寬度) -->
 <div id="handDock" class="hand-dock fixed left-1/2 -translate-x-1/2 bottom-0 translate-y-4 z-[56] hidden pointer-events-none w-3/4">
   
-  <div class="mx-auto w-full px-2 pb-2 pointer-events-auto">
+  <div class="mx-auto w-full px-2 pb-2 pointer-events-none">
     <div class="rounded-2xl p-0"> 
       
       <!-- 2. 內層修改：移除 [&>*]:shrink-0，保留 flex-nowrap -->
       <!-- 這樣當卡片數量多時，瀏覽器會嘗試壓縮卡片寬度來塞進容器 -->
-      <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-4 flex-nowrap min-h-[110px] items-end">
+      <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-4 flex-nowrap min-h-[110px] items-end pointer-events-auto">
         <!-- 這裡面的內容會自動被壓縮 -->
       </div>
       
@@ -512,6 +512,7 @@
           <div class="text-xs text-emerald-100/70">房主按「再來一局」會立即重開；玩家按「再來一局」會向房主提出請求。</div>
           <div class="flex items-center gap-2">
             <button id="btnRestart" class="px-4 py-2 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-black hover:brightness-105 glow-pulse">再來一局</button>
+            <span id="gameOverRoundText" class="text-xs px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-emerald-100/80">第 — 局</span>
             <button id="btnExitRoom" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10">離開房間</button>
           </div>
         </div>
@@ -755,14 +756,14 @@
                     <option value="greenDragon">青龍 +100</option>
                     <option value="noHand">百無 +3</option>
                 </select>
-                <button id="btnSubmit" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-black font-black text-sm shadow-lg hover:brightness-110 active:scale-95 transition-transform">
+                <button id="btnSubmit" class="w-full mt-2 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-black font-black text-sm shadow-lg hover:brightness-110 active:scale-95 transition-transform">
                   提交
                 </button>
              </div>
             
-             <div class="grid grid-cols-2 gap-2">
-                <button id="btnAutoFill" class="col-span-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">快速</button>
-                <button id="btnResetArrange" class="col-span-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">重排</button>
+             <div class="relative z-[57] grid grid-cols-2 gap-2">
+                <button id="btnAutoFill" class="relative z-[57] col-span-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">快速</button>
+                <button id="btnResetArrange" class="relative z-[57] col-span-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">重排</button>
              </div>
 
 
@@ -2671,6 +2672,8 @@
     function openGameOverModal(payload) {
       if (!payload) return;
       $('gameOverRoom').textContent = payload.roomId || (isHost ? (myId||'—') : (clientState.roomId||'—'));
+      const currentRound = Number(payload.round || clientState.round || 0);
+      $('gameOverRoundText').textContent = currentRound > 0 ? `第 ${currentRound} 局` : '第 — 局';
 
       const body = $('gameOverBody');
       body.innerHTML = '';
@@ -4968,6 +4971,7 @@ function eval3NoJoker(cards) {
             roomId: clientState.roomId,
             players: msg.players || [],
             cumulative: clientState.cumulative,
+            round: Number(msg.round || clientState.round || 0),
           };
           // Auto-open final summary after a short delay (unless user opens the round detail modal)
           setTimeout(() => {
@@ -5015,6 +5019,7 @@ function eval3NoJoker(cards) {
           roomId: clientState.roomId,
           players: msg.players || [],
           cumulative: clientState.cumulative,
+          round: Number(msg.round || clientState.round || 0),
         };
 
         const revealOpen = !$('revealModal').classList.contains('hidden');
@@ -5574,12 +5579,14 @@ async function revealRound() {
           roomId: roomRef,
           players: allPlayersForBroadcast(),
           cumulative: hostState.cumulative,
+          round: Number(hostState.round || 0),
         };
         broadcast(overPayload);
         clientState.pendingGameOver = {
           roomId: roomRef,
           players: overPayload.players,
           cumulative: overPayload.cumulative,
+          round: overPayload.round,
         };
         glog('所有局數完成（關閉本局結算後顯示總結）');
       }
