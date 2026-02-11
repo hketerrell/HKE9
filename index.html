@@ -317,7 +317,8 @@
       <div class="absolute top-2 left-2 z-[60]">
         <span id="netBadge" class="text-[11px] px-2 py-1 rounded-full chip text-amber-100">離線</span>
       </div>
-      <div class="absolute top-2 right-2 z-[40]">
+      <div class="absolute top-2 right-2 z-[40] flex items-center gap-2">
+        <span id="topRoundBadge" class="hidden text-[11px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-emerald-100/80 mono">第 — 局</span>
         <button id="btnGoLobby" class="hidden text-[11px] px-2.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10">退出房間</button>
       </div>
 
@@ -443,7 +444,7 @@
       
       <!-- 2. 內層修改：移除 [&>*]:shrink-0，保留 flex-nowrap -->
       <!-- 這樣當卡片數量多時，瀏覽器會嘗試壓縮卡片寬度來塞進容器 -->
-      <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-4 flex-nowrap min-h-[110px] items-end pointer-events-auto">
+      <div id="hand" class="flex gap-0 overflow-x-auto overflow-y-hidden pl-1 pr-10 pb-4 flex-nowrap min-h-[110px] items-end pointer-events-none">
         <!-- 這裡面的內容會自動被壓縮 -->
       </div>
       
@@ -1537,14 +1538,17 @@
       const lobby = $('pageLobby');
       const game = $('pageGame');
       const goLobby = $('btnGoLobby');
+      const topRoundBadge = $('topRoundBadge');
       if (which === 'lobby') {
         lobby.classList.remove('hidden');
         game.classList.add('hidden');
         goLobby.classList.add('hidden');
+        if (topRoundBadge) topRoundBadge.classList.add('hidden');
       } else {
         lobby.classList.add('hidden');
         game.classList.remove('hidden');
         goLobby.classList.remove('hidden');
+        if (topRoundBadge) topRoundBadge.classList.remove('hidden');
       }
       // update update button visibility
       try { setUpdateAvailable(!!clientState.updateAvailable); } catch {}
@@ -1562,9 +1566,12 @@
 
       // Hide "回大廳" while any modal is open to avoid blocking modal buttons
       const goLobby = $('btnGoLobby');
+      const topRoundBadge = $('topRoundBadge');
       if (goLobby) {
         const inGame = !$('pageGame').classList.contains('hidden');
-        goLobby.classList.toggle('hidden', anyOpen || !inGame);
+        const hideTopRight = anyOpen || !inGame;
+        goLobby.classList.toggle('hidden', hideTopRight);
+        if (topRoundBadge) topRoundBadge.classList.toggle('hidden', hideTopRight);
       }
 
       // Hand Dock: only show while Arrange modal is open
@@ -6234,6 +6241,8 @@ async function revealRound() {
       const roundsTotal = isHost ? hostState.settings.roundsTotal : clientState.settings.roundsTotal;
       const round = isHost ? hostState.round : clientState.round;
       $('gameRoundInfo').textContent = round ? `${round} / ${roundsTotal}` : `— / ${roundsTotal}`;
+      const topRoundBadge = $('topRoundBadge');
+      if (topRoundBadge) topRoundBadge.textContent = round ? `第 ${round} 局` : '第 — 局';
       const dealerId = isHost ? hostState.dealerId : clientState.dealerId;
       $('dealerName').textContent = dealerId ? getNameById(dealerId) : '待定';
 
@@ -6259,7 +6268,7 @@ async function revealRound() {
 
       const suitClass = !c ? '' : (isJ ? 'text-violet-700' : SUIT_COLOR[c.s]);
 
-      const btn = el('button', `card poker-card ${sizeCls} ${isJ ? 'pc-joker' : ''} ${variant==='mini' ? 'pc-mini' : ''} ${suitClass} transition`);
+      const btn = el('button', `card poker-card pointer-events-auto ${sizeCls} ${isJ ? 'pc-joker' : ''} ${variant==='mini' ? 'pc-mini' : ''} ${suitClass} transition`);
       if (opts.back) btn.classList.add('card-back');
       if (key) btn.dataset.key = key;
       btn.style.borderColor = opts.selected ? 'rgba(99,102,241,.9)' : 'rgba(15,23,42,.22)';
