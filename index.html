@@ -2547,8 +2547,28 @@
     }
 
     function openDealerPickPreModal(ctx) {
+      const prevCtx = dealerPickPreCtx;
+      const prevSelectedId = dealerPickPreSelectedId;
+
       dealerPickPreCtx = ctx;
-      dealerPickPreSelectedId = ctx?.currentDealerId || dealerPickPreSelectedId || null;
+
+      const playerIds = new Set((ctx?.players || []).map(p => p.id));
+      const isSamePickFlow = !!(prevCtx
+        && Number(prevCtx.round || 0) === Number(ctx?.round || 0)
+        && String(prevCtx.controllerId || '') === String(ctx?.controllerId || '')
+        && String(prevCtx.kind || '') === String(ctx?.kind || ''));
+
+      if (isSamePickFlow && prevSelectedId && playerIds.has(prevSelectedId)) {
+        // Keep previous choice when reopening the same dealer-pick flow
+        // (e.g. app switch/background resume triggers reconnect/snapshot refresh).
+        dealerPickPreSelectedId = prevSelectedId;
+      } else if (ctx?.currentDealerId && playerIds.has(ctx.currentDealerId)) {
+        dealerPickPreSelectedId = ctx.currentDealerId;
+      } else if (prevSelectedId && playerIds.has(prevSelectedId)) {
+        dealerPickPreSelectedId = prevSelectedId;
+      } else {
+        dealerPickPreSelectedId = null;
+      }
 
       const isBig = ctx?.kind === 'BJ';
       $('dealerPickPreTitle').textContent = isBig ? '你持有大鬼（本局你可指定莊家）' : '你持有細鬼（本局你可指定莊家）';
