@@ -2508,7 +2508,8 @@
       listRoot.innerHTML = '';
 
       for (const p of players) {
-        const sub = subs[p.id];
+        const pid = String(p.id || '');
+        const sub = subs[pid] || subs[p.id];
         const dc = sub?.dealerCard ? cardLabel(sub.dealerCard) : '—';
 
         const row = el('button','text-left w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 hover:bg-black/25');
@@ -2517,12 +2518,12 @@
         const top = el('div','flex items-center justify-between gap-2');
         const left = el('div','min-w-0');
         left.appendChild(el('div','text-sm text-slate-50 truncate', p.name));
-        left.appendChild(el('div','text-[10px] text-emerald-100/70 mono truncate', p.id));
+        left.appendChild(el('div','text-[10px] text-emerald-100/70 mono truncate', pid));
 
         const right = el('div','flex items-center gap-2');
         const dcBadge = el('div','text-xs font-black text-amber-100 mono', dc);
 
-        const selected = dealerPickPreSelectedId === p.id;
+        const selected = String(dealerPickPreSelectedId || '') === pid;
         const pickBadge = el('div','text-[11px] px-2 py-1 rounded-full border');
         pickBadge.className = 'text-[11px] px-2 py-1 rounded-full border ' + (selected
           ? 'bg-amber-400/15 border-amber-200/30 text-amber-100'
@@ -2538,7 +2539,7 @@
 
         row.addEventListener('click', (e) => {
           e.preventDefault();
-          dealerPickPreSelectedId = p.id;
+          dealerPickPreSelectedId = pid;
           renderDealerPickPreLists();
         });
 
@@ -2547,8 +2548,30 @@
     }
 
     function openDealerPickPreModal(ctx) {
+      const prevCtx = dealerPickPreCtx;
+      const prevSelectedId = dealerPickPreSelectedId;
+
       dealerPickPreCtx = ctx;
-      dealerPickPreSelectedId = ctx?.currentDealerId || dealerPickPreSelectedId || null;
+
+      const playerIds = new Set((ctx?.players || []).map(p => String(p.id || '')));
+      const currentDealerId = String(ctx?.currentDealerId || '');
+      const normalizedPrevSelectedId = String(prevSelectedId || '');
+      const isSamePickFlow = !!(prevCtx
+        && Number(prevCtx.round || 0) === Number(ctx?.round || 0)
+        && String(prevCtx.controllerId || '') === String(ctx?.controllerId || '')
+        && String(prevCtx.kind || '') === String(ctx?.kind || ''));
+
+      if (isSamePickFlow && normalizedPrevSelectedId && playerIds.has(normalizedPrevSelectedId)) {
+        // Keep previous choice when reopening the same dealer-pick flow
+        // (e.g. app switch/background resume triggers reconnect/snapshot refresh).
+        dealerPickPreSelectedId = normalizedPrevSelectedId;
+      } else if (currentDealerId && playerIds.has(currentDealerId)) {
+        dealerPickPreSelectedId = currentDealerId;
+      } else if (normalizedPrevSelectedId && playerIds.has(normalizedPrevSelectedId)) {
+        dealerPickPreSelectedId = normalizedPrevSelectedId;
+      } else {
+        dealerPickPreSelectedId = null;
+      }
 
       const isBig = ctx?.kind === 'BJ';
       $('dealerPickPreTitle').textContent = isBig ? '你持有大鬼（本局你可指定莊家）' : '你持有細鬼（本局你可指定莊家）';
@@ -7476,15 +7499,15 @@ async function revealRound() {
       }
 
       // If controller is the host (no clientConn), apply locally.
-      if (isHost && dealerPickPreCtx.controllerId === hostId) {
-        const ids = [hostId, ...Object.keys(hostState.players)];
-        if (!ids.includes(dealerPickPreSelectedId)) {
+      if (isHost && String(dealerPickPreCtx.controllerId || '') === String(hostId || '')) {
+        const ids = [hostId, ...Object.keys(hostState.players)].map(id => String(id || ''));
+        if (!ids.includes(String(dealerPickPreSelectedId || ''))) {
           toast('指定的莊家不在房間內');
           return;
         }
-        hostState.dealerOverride = dealerPickPreSelectedId;
+        hostState.dealerOverride = String(dealerPickPreSelectedId || '');
         hostState.dealerPick = null;
-        broadcast({t:'dealerPickFinal', round: dealerPickPreCtx.round, dealerId: dealerPickPreSelectedId});
+        broadcast({t:'dealerPickFinal', round: dealerPickPreCtx.round, dealerId: String(dealerPickPreSelectedId || '')});
         toast('已指定莊家，開始結算');
         closeDealerPickPreModal();
         revealRound();
@@ -7501,7 +7524,7 @@ async function revealRound() {
         pick: {
           round: dealerPickPreCtx.round,
           kind: dealerPickPreCtx.kind,
-          dealerId: dealerPickPreSelectedId,
+          dealerId: String(dealerPickPreSelectedId || ''),
         }
       });
       toast('已送出莊家指定');
