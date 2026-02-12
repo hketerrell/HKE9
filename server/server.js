@@ -576,12 +576,14 @@ function findDealerPickController(submissions, ids) {
 
 function startDealerPickOrReveal(room) {
   if (room.revealed || room.revealInProgress) return;
+  if (room.dealerPick && Number(room.dealerPick.round || 0) === Number(room.round || 0)) return;
   const subs = room.submissions || {};
   const ids = currentRoundPlayerIds(room);
   if (!ids.length) return;
   if (!ids.every((id) => !!subs[id])) return;
 
-  const controller = findDealerPickController(subs, ids);
+  const connectedIds = ids.filter((id) => room.clients.has(id));
+  const controller = findDealerPickController(subs, connectedIds);
   if (!controller) {
     room.dealerPick = null;
     resolveReveal(room, null);
@@ -603,7 +605,7 @@ function startDealerPickOrReveal(room) {
   const controllerSocket = room.clients.get(controller.controllerId)?.socket;
   if (!controllerSocket) {
     room.dealerPick = null;
-    resolveReveal(room, null);
+    startDealerPickOrReveal(room);
     return;
   }
 
@@ -907,6 +909,10 @@ wss.on('connection', (ws) => {
     }
 
     if (leftDuringRound) {
+      if (room.dealerPick?.controllerId === ws.id) {
+        room.dealerPick = null;
+        room.dealerOverride = null;
+      }
       const ready = {};
       for (const id of currentRoundPlayerIds(room)) ready[id] = !!room.submissions[id];
       relayToRoom(room, { t: 'ready', ready });
