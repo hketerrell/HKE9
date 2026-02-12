@@ -472,6 +472,17 @@ function pruneDisconnectedSeats(room) {
   room.seatOrder = keep;
 }
 
+function findDisconnectedSeatByName(room, playerName) {
+  const targetName = String(playerName || '').trim();
+  if (!targetName) return null;
+  for (const id of room.seatOrder) {
+    if (room.clients.has(id)) continue;
+    const offlineName = String(room.disconnectedSeatNames?.[id] || '').trim();
+    if (offlineName && offlineName === targetName) return id;
+  }
+  return null;
+}
+
 function relayToRoom(room, payload, exceptId = null) {
   for (const [id, p] of room.clients.entries()) {
     if (id === exceptId) continue;
@@ -713,10 +724,16 @@ wss.on('connection', (ws) => {
       await ensureRoomRecordLoaded(room);
       ws.roomId = roomId;
       const playerName = String(msg.name || '玩家').trim() || '玩家';
+
+      // Reclaim the disconnected seat with the same name to avoid duplicate avatars
+      // and wrong reveal scoring on a ghost seat.
+      const reclaimSeatId = findDisconnectedSeatByName(room, playerName);
+      if (reclaimSeatId) ws.id = reclaimSeatId;
+
       room.clients.set(ws.id, { socket: ws, name: playerName });
       delete room.disconnectedSeatNames[ws.id];
       if (!room.seatOrder.includes(ws.id)) room.seatOrder.push(ws.id);
-      room.preStartReadyMap[ws.id] = false;
+      if (room.preStartReadyMap[ws.id] === undefined) room.preStartReadyMap[ws.id] = false;
       if (room.cumulative[ws.id] === undefined && room.cumulativeByName[playerName] !== undefined) {
         room.cumulative[ws.id] = Number(room.cumulativeByName[playerName] || 0);
       }
