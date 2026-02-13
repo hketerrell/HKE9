@@ -6,7 +6,7 @@ function cardKey(c) {
 }
 
 function compareSelectCard(a, b) {
-  const suitOrder = { S: 4, H: 3, D: 2, C: 1, J: 5 };
+  const suitOrder = { S: 4, H: 3, C: 2, D: 1, J: 5 };
   const ra = a.s === 'J' ? 100 : a.r;
   const rb = b.s === 'J' ? 100 : b.r;
   if (ra !== rb) return ra - rb;
