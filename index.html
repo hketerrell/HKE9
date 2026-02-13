@@ -2770,8 +2770,8 @@
     }
 
     function compareSelectCard(a,b) {
-      // 大鬼/細鬼最高，其次點數，再比花色 S>H>D>C
-      const suitOrder = {S:4,H:3,D:2,C:1,J:5};
+      // 大鬼/細鬼最高，其次點數，再比花色 S>H>C>D
+      const suitOrder = {S:4,H:3,C:2,D:1,J:5};
       const ra = (a.s==='J') ? 100 : a.r;
       const rb = (b.s==='J') ? 100 : b.r;
       if (ra !== rb) return ra - rb;
@@ -6456,7 +6456,7 @@ async function revealRound() {
       });
 
       // 5. 排序邏輯 (依點數大小)
-      const suitOrder = {S:4, H:3, D:2, C:1, J:5}; // 花色權重
+      const suitOrder = {S:4, H:3, C:2, D:1, J:5}; // 花色權重
       remaining.sort((a,b) => {
         // 大鬼(16) > 細鬼(15) > A(14) > K(13)...
         // 如果是鬼牌，rank 分別是 16, 15，數字牌則依 r
