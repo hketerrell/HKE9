@@ -483,6 +483,18 @@ function findDisconnectedSeatByName(room, playerName) {
   return null;
 }
 
+function findSeatByName(room, playerName) {
+  const targetName = String(playerName || '').trim();
+  if (!targetName) return null;
+
+  for (const [id, p] of room.clients.entries()) {
+    const onlineName = String(p?.name || '').trim();
+    if (onlineName && onlineName === targetName) return id;
+  }
+
+  return findDisconnectedSeatByName(room, targetName);
+}
+
 function relayToRoom(room, payload, exceptId = null) {
   for (const [id, p] of room.clients.entries()) {
     if (id === exceptId) continue;
@@ -725,10 +737,15 @@ wss.on('connection', (ws) => {
       ws.roomId = roomId;
       const playerName = String(msg.name || '玩家').trim() || '玩家';
 
-      // Reclaim the disconnected seat with the same name to avoid duplicate avatars
-      // and wrong reveal scoring on a ghost seat.
-      const reclaimSeatId = findDisconnectedSeatByName(room, playerName);
+      // Reclaim seat by player name (online/offline) so reconnecting won't create
+      // socket-id clones for the same player.
+      const reclaimSeatId = findSeatByName(room, playerName);
       if (reclaimSeatId) ws.id = reclaimSeatId;
+
+      const existingSeat = room.clients.get(ws.id);
+      if (existingSeat && existingSeat.socket !== ws) {
+        try { existingSeat.socket.close(); } catch {}
+      }
 
       room.clients.set(ws.id, { socket: ws, name: playerName });
       delete room.disconnectedSeatNames[ws.id];
@@ -886,6 +903,10 @@ wss.on('connection', (ws) => {
     if (!room) return;
 
     const closedPlayer = room.clients.get(ws.id);
+    if (closedPlayer?.socket && closedPlayer.socket !== ws) {
+      // Seat already rebound to a newer socket (same player name).
+      return;
+    }
     const closedName = String(closedPlayer?.name || '').trim();
     if (closedName && room.cumulative[ws.id] !== undefined) {
       room.cumulativeByName[closedName] = Number(room.cumulative[ws.id] || 0);
