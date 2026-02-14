@@ -711,7 +711,7 @@
             ✕
          </button>
 
-         <div class="flex flex-col justify-center gap-6 select-none h-full w-auto order-1">
+         <div class="relative flex flex-col justify-center gap-6 select-none h-full w-auto order-1">
              
              <div class="flex items-center gap-2 justify-end">
                 <span id="headEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
@@ -731,6 +731,10 @@
                 </div>
                 <div id="slotMid" class="grid grid-cols-3 gap-1.5"></div>
              </div>
+
+
+             <button id="btnSwapMidTail" title="中墩與尾墩互換" class="absolute right-[170px] sm:right-[198px] top-[62%] -translate-y-1/2 w-6 h-6 rounded-full border border-amber-300/35 bg-amber-400/15 text-amber-100 text-xs font-black leading-none hover:bg-amber-300/25 active:scale-95 transition z-10">⇅</button>
+
 
              <div class="flex items-center gap-2 justify-end">
                  <span id="tailEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
@@ -7231,6 +7235,24 @@ async function revealRound() {
       renderSlots();
     }
 
+    function swapMidTailArranged() {
+      if (clientState.submitted) {
+        toast('已提交，無法互換');
+        return;
+      }
+      const current = clientState.arranged || { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      const prevMid = [...(current.mid || [null, null, null])];
+      const prevTail = [...(current.tail || [null, null, null])];
+      clientState.arranged.mid = prevTail;
+      clientState.arranged.tail = prevMid;
+      clearPick();
+      rebuildUsedFromHand();
+      renderGameHeader();
+      renderHand();
+      renderSlots();
+      toast('已互換中墩與尾墩');
+    }
+
     function autoFillRandomNoFoul() {
       if (clientState.submitted) return;
 
@@ -7646,6 +7668,7 @@ async function revealRound() {
       if (clientState.submitted) return toast('已提交，無法重排');
       resetArrange();
     });
+    $('btnSwapMidTail')?.addEventListener('click', () => swapMidTailArranged());
     $('btnAutoFill').addEventListener('click', () => autoFillRandomNoFoul());
     $('btnSubmit').addEventListener('click', () => submitArrangement());
 
