@@ -690,7 +690,7 @@
     
     <div class="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
       
-      <div class="pointer-events-auto relative flex flex-row items-center justify-center gap-4 sm:gap-10 p-4 w-full max-w-5xl h-full max-h-[85vh]">
+      <div class="pointer-events-auto relative flex flex-row items-center justify-center gap-3 sm:gap-6 p-4 w-full max-w-6xl h-full max-h-[85vh]">
          
          <div class="absolute top-0 left-4 z-30 flex flex-col items-start shadow-black drop-shadow-md">
             <div class="text-[10px] text-emerald-100/60">排牌階段</div>
@@ -701,7 +701,7 @@
             ✕
          </button>
 
-         <div class="flex flex-col justify-center gap-6 select-none h-full w-auto">
+         <div class="flex flex-col justify-center gap-6 select-none h-full w-auto order-1">
              
              <div class="flex items-center gap-2 justify-end">
                 <span id="headEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
@@ -732,8 +732,7 @@
              </div>
           </div>
             
-         <div class="flex flex-col w-32 shrink-0 gap-3 justify-center">
-             
+         <div class="flex flex-col w-40 shrink-0 gap-3 justify-center order-2">
              <div class="flex flex-col items-center gap-1 p-2 rounded-xl bg-white/5 border border-white/5">
                 <div class="text-[10px] text-amber-100/60 font-bold">選莊</div>
                 <div id="dealerCardSlot" class="shrink-0 shadow-[0_0_20px_rgba(251,191,36,0.15)]"></div>
@@ -757,17 +756,15 @@
                     <option value="greenDragon">青龍 +100</option>
                     <option value="noHand">百無 +3</option>
                 </select>
-                <button id="btnSubmit" class="w-full mt-2 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-black font-black text-sm shadow-lg hover:brightness-110 active:scale-95 transition-transform">
-                  提交
-                </button>
              </div>
-            
-             <div class="relative z-[57] grid grid-cols-2 gap-2">
-                <button id="btnAutoFill" class="relative z-[57] col-span-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">快速</button>
-                <button id="btnResetArrange" class="relative z-[57] col-span-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">重排</button>
-             </div>
+         </div>
 
-
+         <div class="flex flex-col w-28 shrink-0 gap-2 justify-center order-3">
+            <button id="btnSubmit" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-black font-black text-sm shadow-lg hover:brightness-110 active:scale-95 transition-transform">
+              提交
+            </button>
+            <button id="btnAutoFill" class="w-full py-2.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">快速</button>
+            <button id="btnResetArrange" class="w-full py-2.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-slate-200 text-xs font-bold active:scale-95 transition">重排</button>
          </div>
 
       </div>
@@ -7111,24 +7108,37 @@ async function revealRound() {
     }
 
     function autoFillRandomAllowFoul() {
-      // always produce a layout (may be wulong)
-      resetArrange();
-      const pool = [...(clientState.cards9 || [])];
+      const arranged = clientState.arranged || { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      const fixedKeys = new Set();
+      for (const slotName of ['head','mid','tail']) {
+        for (const c of (arranged[slotName] || [])) {
+          if (!c) continue;
+          fixedKeys.add(cardKey(c));
+        }
+      }
+
+      let dealer = clientState.dealerCard;
+      if (!dealer) {
+        const candidates = (clientState.cards9 || []).filter((c) => !fixedKeys.has(cardKey(c)));
+        if (!candidates.length) return false;
+        dealer = candidates[0];
+        clientState.dealerCard = dealer;
+      }
+
+      const dealerKey = cardKey(dealer);
+      const pool = (clientState.cards9 || []).filter((c) => {
+        const key = cardKey(c);
+        return key !== dealerKey && !fixedKeys.has(key);
+      });
       shuffle(pool);
-      const dealer = clientState.dealerCard || pool.shift();
-      clientState.dealerCard = dealer;
-      // remove dealer from pool
-      const dk = cardKey(dealer);
-      const di = pool.findIndex(c => cardKey(c)===dk);
-      if (di >= 0) pool.splice(di,1);
-      if (pool.length < 8) return false;
-      const head = pool.slice(0,2);
-      const mid = pool.slice(2,5);
-      const tail = pool.slice(5,8);
-      clientState.arranged.head = head;
-      clientState.arranged.mid = mid;
-      clientState.arranged.tail = tail;
-      clientState.usedFromHand = new Set(pool.slice(0,8).map(cardKey));
+
+      for (const slotName of ['head','mid','tail']) {
+        for (let i=0; i<(arranged[slotName] || []).length; i++) {
+          if (!arranged[slotName][i]) arranged[slotName][i] = pool.shift() || null;
+        }
+      }
+
+      rebuildUsedFromHand();
       renderGameHeader();
       renderHand();
       renderSlots();
@@ -7190,41 +7200,69 @@ async function revealRound() {
 
     function autoFillRandomNoFoul() {
       if (clientState.submitted) return;
-      resetArrange();
 
-      // pick dealer card if not chosen
+      const arranged = clientState.arranged || { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      const fixedKeys = new Set();
+      for (const slotName of ['head','mid','tail']) {
+        for (const c of (arranged[slotName] || [])) {
+          if (!c) continue;
+          fixedKeys.add(cardKey(c));
+        }
+      }
+
       let dealer = clientState.dealerCard;
-      for (let tries=0; tries<80; tries++) {
-        const pool = [...(clientState.cards9 || [])];
-        shuffle(pool);
-        if (!dealer) dealer = pool.shift();
-        const dk = cardKey(dealer);
-        const di = pool.findIndex(c => cardKey(c)===dk);
-        if (di >= 0) pool.splice(di,1);
+      if (!dealer) {
+        const candidates = (clientState.cards9 || []).filter((c) => !fixedKeys.has(cardKey(c)));
+        if (!candidates.length) {
+          toast('快速排失敗（可用牌不足），請手動排');
+          return;
+        }
+        dealer = candidates[0];
+      }
 
-        if (pool.length !== 8) {
-          dealer = null;
-          continue;
+      const dealerKey = cardKey(dealer);
+      const basePool = (clientState.cards9 || []).filter((c) => {
+        const key = cardKey(c);
+        return key !== dealerKey && !fixedKeys.has(key);
+      });
+
+      const emptyRefs = [];
+      for (const slotName of ['head','mid','tail']) {
+        for (let i=0; i<(arranged[slotName] || []).length; i++) {
+          if (!arranged[slotName][i]) emptyRefs.push([slotName, i]);
+        }
+      }
+
+      if (basePool.length < emptyRefs.length) {
+        toast('快速排失敗（可用牌不足），請手動排');
+        return;
+      }
+
+      for (let tries=0; tries<80; tries++) {
+        const pool = [...basePool];
+        shuffle(pool);
+        const next = {
+          head: [...arranged.head],
+          mid: [...arranged.mid],
+          tail: [...arranged.tail],
+        };
+
+        for (const [slotName, idx] of emptyRefs) {
+          next[slotName][idx] = pool.shift() || null;
         }
 
-        const head = pool.slice(0,2);
-        const mid = pool.slice(2,5);
-        const tail = pool.slice(5,8);
-
-        const foul = detectFoul(head, mid, tail);
+        const foul = detectFoul(next.head, next.mid, next.tail);
         if (!foul.foul) {
           clientState.dealerCard = dealer;
-          clientState.arranged.head = head;
-          clientState.arranged.mid = mid;
-          clientState.arranged.tail = tail;
-          clientState.usedFromHand = new Set(pool.map(cardKey));
+          clientState.arranged.head = next.head;
+          clientState.arranged.mid = next.mid;
+          clientState.arranged.tail = next.tail;
+          rebuildUsedFromHand();
           renderGameHeader();
           renderHand();
           renderSlots();
           return;
         }
-
-        dealer = null;
       }
 
       toast('快速排失敗（找不到不擺烏龍組合），請手動排');
