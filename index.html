@@ -6417,6 +6417,11 @@ async function revealRound() {
         const rank = Number(jr?.r || 0);
         const rtxt = rank ? (rank<=10 ? String(rank) : (rank===11?'J':rank===12?'Q':rank===13?'K':'A')) : 'J';
         const suit = jr?.s && SUIT_ICON[jr.s] ? SUIT_ICON[jr.s] : '☆';
+        const cornerColor = jr?.s && SUIT_COLOR[jr.s] ? SUIT_COLOR[jr.s] : '';
+        if (cornerColor) {
+          tl.classList.add(cornerColor);
+          br.classList.add(cornerColor);
+        }
 
         tl.appendChild(el('div','prank', rtxt));
         tl.appendChild(el('div','psuit', suit));
