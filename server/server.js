@@ -36,7 +36,41 @@ async function ensureRecordsDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await recordsPool.query(`
+    CREATE TABLE IF NOT EXISTS app_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await recordsPool.query(
+    `
+      INSERT INTO app_config (key, value)
+      VALUES ('required_client_version', $1)
+      ON CONFLICT (key) DO NOTHING
+    `,
+    [String(process.env.REQUIRED_CLIENT_VERSION || 'Beta').trim() || 'Beta'],
+  );
   recordsDbReady = true;
+}
+
+
+async function readRequiredClientVersion() {
+  const fallback = String(process.env.REQUIRED_CLIENT_VERSION || 'Beta').trim() || 'Beta';
+  if (!hasRecordsDb()) return fallback;
+
+  try {
+    await ensureRecordsDb();
+    const result = await recordsPool.query(
+      'SELECT value FROM app_config WHERE key = $1 LIMIT 1',
+      ['required_client_version'],
+    );
+    const rowValue = String(result.rows?.[0]?.value || '').trim();
+    return rowValue || fallback;
+  } catch (error) {
+    console.error('Failed to read required_client_version from app_config:', error?.message || error);
+    return fallback;
+  }
 }
 
 function normalizeRecordRoomId(value) {
@@ -274,6 +308,24 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 405, { error: 'Method not allowed' });
     return;
   }
+
+  if (pathname === '/app-version') {
+    setCorsHeaders(res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const requiredVersion = await readRequiredClientVersion();
+    sendJson(res, 200, { requiredVersion });
+    return;
+  }
+
 
   if (pathname === '/save') {
     setCorsHeaders(res);
@@ -733,6 +785,13 @@ wss.on('connection', (ws) => {
         return;
       }
       const room = getRoom(roomId);
+      const joinVersion = String(msg.appVersion || '').trim();
+      const requiredVersion = await readRequiredClientVersion();
+      if (!joinVersion || joinVersion !== requiredVersion) {
+        send(ws, { t: 'error', message: `版本不正確（需要 ${requiredVersion}）` });
+        try { ws.close(); } catch {}
+        return;
+      }
       await ensureRoomRecordLoaded(room);
       ws.roomId = roomId;
       const playerName = String(msg.name || '玩家').trim() || '玩家';
