@@ -125,6 +125,16 @@
     /* tighter overlap for smaller hand cards */
     .hand-overlap { margin-left: -32px; }
 
+    /* Arrange modal: shift the whole panel left (hand dock remains centered) */
+    .arrange-layout-shift {
+      transform: translateX(-20px);
+    }
+    @media (min-width: 640px) {
+      .arrange-layout-shift {
+        transform: translateX(-36px);
+      }
+    }
+
     /* Kiosk-like fullscreen landscape */
     @media (orientation: portrait) {
       #rotateHint { display: flex !important; }
@@ -690,7 +700,7 @@
     
     <div class="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
       
-      <div class="pointer-events-auto relative flex flex-row items-center justify-center gap-3 sm:gap-6 p-4 w-full max-w-6xl h-full max-h-[85vh]">
+      <div class="arrange-layout-shift pointer-events-auto relative flex flex-row items-center justify-center gap-3 sm:gap-6 p-4 w-full max-w-6xl h-full max-h-[85vh]">
          
          <div class="absolute top-0 left-4 z-30 flex flex-col items-start shadow-black drop-shadow-md">
             <div class="text-[10px] text-emerald-100/60">排牌階段</div>
