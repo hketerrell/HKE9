@@ -3024,6 +3024,38 @@ function eval3NoJoker(cards) {
       return [...uniq.values()].sort((a,b) => compareEval(b.eval, a.eval));
     }
 
+    function evalStrength(e, cardCount) {
+      const t = e?.t || [];
+      if (cardCount === 2) return (e?.cat||0)*1e9 + (t[0]||0)*1e6 + (t[1]||0)*1e3;
+      return (e?.cat||0)*1e9 + (t[0]||0)*1e6 + (t[1]||0)*1e3 + (t[2]||0);
+    }
+
+    function resolveBestOptions(head, mid, tail) {
+      const headOptions = jokerOptions2(head);
+      const midOptions = jokerOptions3(mid);
+      const tailOptions = jokerOptions3(tail);
+      const fallback = { head: headOptions[0], mid: midOptions[0], tail: tailOptions[0], adjusted: false };
+      let best = null;
+
+      for (const ho of headOptions) {
+        const sh = evalStrength(ho.eval, 2);
+        for (const mo of midOptions) {
+          const sm = evalStrength(mo.eval, 3);
+          if (sh > sm) continue;
+          for (const to of tailOptions) {
+            const st = evalStrength(to.eval, 3);
+            if (sm > st) continue;
+            const key = st * 1e10 + sm * 1e5 + sh;
+            if (!best || key > best.key) best = { head: ho, mid: mo, tail: to, key };
+          }
+        }
+      }
+
+      if (!best) return fallback;
+      const adjusted = !(best.head.key === fallback.head.key && best.mid.key === fallback.mid.key && best.tail.key === fallback.tail.key);
+      return { head: best.head, mid: best.mid, tail: best.tail, adjusted };
+    }
+
     // -------------------- Scoring helpers (vs dealer) --------------------
     // 頭墩：若勝方為一對，該墩得分 = 對子點數（2~14）；否則勝方得 1。
     function headWinPoints(e2) {
@@ -3084,9 +3116,10 @@ function eval3NoJoker(cards) {
 
     function detectFoul(head, mid, tail) {
       if (!isAllFilled(head) || !isAllFilled(mid) || !isAllFilled(tail)) return {foul:false};
-      const sh = strength2(head);
-      const sm = strength3(mid);
-      const st = strength3(tail);
+      const resolved = resolveBestOptions(head, mid, tail);
+      const sh = evalStrength(resolved.head.eval, 2);
+      const sm = evalStrength(resolved.mid.eval, 3);
+      const st = evalStrength(resolved.tail.eval, 3);
       if (sh > sm) return {foul:true, msg:'擺烏龍：頭墩大於中墩'};
       if (sm > st) return {foul:true, msg:'擺烏龍：中墩大於尾墩'};
       return {foul:false};
@@ -3130,6 +3163,13 @@ function eval3NoJoker(cards) {
     function validateSpecial(code, all9Cards, sub, evals) {
       const c = code || 'none';
       if (c === 'none') return {ok:true, bonus:0};
+
+      const arrangedCards = [
+        ...(sub?.head || []),
+        ...(sub?.mid || []),
+        ...(sub?.tail || []),
+      ].filter(Boolean);
+      if (arrangedCards.some(x => x.s === 'J')) return {ok:false, bonus:0};
 
       const all = (all9Cards || []).filter(Boolean);
       const jokers = all.filter(x => x.s === 'J').length;
@@ -3827,11 +3867,6 @@ function eval3NoJoker(cards) {
       revealTableRendered: false,
       waitingForHost: false,
       appVersion: '',
-      jokerCycle: {
-        head: { sig: '', idx: 0 },
-        mid: { sig: '', idx: 0 },
-        tail: { sig: '', idx: 0 },
-      },
     };
 
     // -------------------- Persisted room record (DAY/MON) via Render API(PostgreSQL) --------------------
@@ -6814,16 +6849,25 @@ async function revealRound() {
 
     function renderSlots() {
       const sizes = { head: 2, mid: 3, tail: 3 };
-      const slotJokerDisplay = { head: {}, mid: {}, tail: {} };
       const makeSlot = (id, slotName) => {
         const root = $(id);
         root.innerHTML = '';
-        for (let i=0;i<sizes[slotName];i++) root.appendChild(renderSlotCell(slotName, i, slotJokerDisplay[slotName]));
+        for (let i=0;i<sizes[slotName];i++) root.appendChild(renderSlotCell(slotName, i, {}));
       };
 
       const h = clientState.arranged.head;
       const m = clientState.arranged.mid;
       const t = clientState.arranged.tail;
+      const arrangedHasJoker = [...h, ...m, ...t].some(c => c?.s === 'J');
+
+      const selReport = $('selReport');
+      if (selReport) {
+        if (arrangedHasJoker && selReport.value !== 'none') selReport.value = 'none';
+        for (const opt of selReport.options) {
+          if (opt.value !== 'none') opt.disabled = arrangedHasJoker;
+        }
+        selReport.title = arrangedHasJoker ? '排牌區有鬼牌時不可報到（若強行報到，結算作擺烏龍）' : '';
+      }
 
       const evalCfg = [
         { slot: 'head', el: $('headEval'), cards: h, filled: isAllFilled(h), options: isAllFilled(h) ? jokerOptions2(h) : [] },
@@ -6831,42 +6875,27 @@ async function revealRound() {
         { slot: 'tail', el: $('tailEval'), cards: t, filled: isAllFilled(t), options: isAllFilled(t) ? jokerOptions3(t) : [] },
       ];
 
-      for (const cfg of evalCfg) {
-        const sig = cfg.cards.map(c => (c ? cardKey(c) : '_')).join('|');
-        const cycle = clientState.jokerCycle[cfg.slot] || { sig: '', idx: 0 };
-        if (cycle.sig !== sig) {
-          cycle.sig = sig;
-          cycle.idx = 0;
-        }
+      const allFilled = isAllFilled(h) && isAllFilled(m) && isAllFilled(t);
+      const resolved = allFilled ? resolveBestOptions(h, m, t) : null;
 
+      for (const cfg of evalCfg) {
         if (!cfg.filled || !cfg.options.length) {
           cfg.el.textContent = '—';
-          cfg.el.classList.remove('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
           cfg.el.removeAttribute('title');
-          clientState.jokerCycle[cfg.slot] = cycle;
           continue;
         }
 
-        cycle.idx = ((cycle.idx % cfg.options.length) + cfg.options.length) % cfg.options.length;
-        const current = cfg.options[cycle.idx];
+        const current = resolved?.[cfg.slot] || cfg.options[0];
         const baseLabel = current.eval.name;
-        const jokersInSlot = cfg.cards.filter(c => c?.s === 'J');
-        const reps = current.jokerAsCards || [];
-        for (let i=0; i<jokersInSlot.length; i++) {
-          if (reps[i]) slotJokerDisplay[cfg.slot][cardKey(jokersInSlot[i])] = reps[i];
-        }
         if (current.jokerAsText) {
           cfg.el.textContent = `${baseLabel}（鬼=${current.jokerAsText}）`;
-          cfg.el.classList.add('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
-          cfg.el.title = cfg.options.length > 1
-            ? `點擊切換鬼牌可能性（${cycle.idx + 1}/${cfg.options.length}）`
-            : '鬼牌目前視為此牌型';
+          cfg.el.title = (resolved?.adjusted && allFilled)
+            ? '已自動調整鬼牌牌型以避免擺烏龍'
+            : '鬼牌已自動套用最適牌型';
         } else {
           cfg.el.textContent = baseLabel;
-          cfg.el.classList.remove('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
           cfg.el.removeAttribute('title');
         }
-        clientState.jokerCycle[cfg.slot] = cycle;
       }
 
       makeSlot('slotHead', 'head');
@@ -7653,19 +7682,6 @@ async function revealRound() {
     $('btnCloseArrange').addEventListener('click', closeArrangeModal);
     $('btnCloseArrange2')?.addEventListener('click', closeArrangeModal);
     $('arrangeBackdrop').addEventListener('click', closeArrangeModal);
-
-    const bindJokerCycle = (slot, id) => {
-      $(id)?.addEventListener('click', () => {
-        if (clientState.submitted) return;
-        const cycle = clientState.jokerCycle[slot];
-        if (!cycle || !cycle.sig) return;
-        cycle.idx += 1;
-        renderSlots();
-      });
-    };
-    bindJokerCycle('head', 'headEval');
-    bindJokerCycle('mid', 'midEval');
-    bindJokerCycle('tail', 'tailEval');
 
     // Table center button is re-created by renderTableSeats(); its click handler is bound there.
 
