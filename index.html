@@ -2951,11 +2951,11 @@ function eval3NoJoker(cards) {
       const jokers = cards.filter(c => c?.s === 'J').length;
       if (jokers === 0) {
         const e = eval2NoJoker(cards);
-        return [{eval: e, jokerAsText: '', key: `${e.cat}|${e.t.join(',')}`}];
+        return [{eval: e, jokerAsText: '', jokerAsCards: [], key: `${e.cat}|${e.t.join(',')}`}];
       }
       if (jokers === 2) {
         const e = {cat: 1, t: [15], name: '一對', usedJoker: true};
-        return [{eval: e, jokerAsText: '雙鬼（15分）', key: `${e.cat}|${e.t.join(',')}`}];
+        return [{eval: e, jokerAsText: '雙鬼（15分）', jokerAsCards: [], key: `${e.cat}|${e.t.join(',')}`}];
       }
 
       const base = cards.filter(c => c && c.s !== 'J');
@@ -2974,7 +2974,7 @@ function eval3NoJoker(cards) {
         const e = eval2NoJoker(h);
         const key = `${e.cat}|${e.t.join(',')}`;
         if (!uniq.has(key)) {
-          uniq.set(key, {eval: e, jokerAsText: cardLabel(rep), key});
+          uniq.set(key, {eval: e, jokerAsText: cardLabel(rep), jokerAsCards: [rep], key});
         }
       }
       return [...uniq.values()].sort((a,b) => compareEval(b.eval, a.eval));
@@ -2984,7 +2984,7 @@ function eval3NoJoker(cards) {
       const jokers = cards.filter(c => c?.s === 'J').length;
       if (jokers === 0) {
         const e = eval3NoJoker(cards);
-        return [{eval: e, jokerAsText: '', key: `${e.cat}|${e.t.join(',')}`}];
+        return [{eval: e, jokerAsText: '', jokerAsCards: [], key: `${e.cat}|${e.t.join(',')}`}];
       }
 
       const base = cards.filter(c => c && c.s !== 'J');
@@ -3005,6 +3005,7 @@ function eval3NoJoker(cards) {
           uniq.set(key, {
             eval: e,
             jokerAsText: reps.map(cardLabel).join(' + '),
+            jokerAsCards: reps,
             key,
           });
         }
@@ -6412,10 +6413,15 @@ async function revealRound() {
       const br = el('div', 'pcorner br');
 
       if (isJ) {
-        tl.appendChild(el('div','prank', 'J'));
-        tl.appendChild(el('div','psuit', '☆'));
-        br.appendChild(el('div','prank', 'J'));
-        br.appendChild(el('div','psuit', '☆'));
+        const jr = opts.jokerRep;
+        const rank = Number(jr?.r || 0);
+        const rtxt = rank ? (rank<=10 ? String(rank) : (rank===11?'J':rank===12?'Q':rank===13?'K':'A')) : 'J';
+        const suit = jr?.s && SUIT_ICON[jr.s] ? SUIT_ICON[jr.s] : '☆';
+
+        tl.appendChild(el('div','prank', rtxt));
+        tl.appendChild(el('div','psuit', suit));
+        br.appendChild(el('div','prank', rtxt));
+        br.appendChild(el('div','psuit', suit));
 
         const center = el('div','pcenter');
         center.textContent = (c.j === 'BJ') ? '大鬼' : '細鬼';
@@ -6765,7 +6771,7 @@ async function revealRound() {
       renderSlots();
     }
 
-    function renderSlotCell(slotName, idx) {
+    function renderSlotCell(slotName, idx, jokerDisplayMap={}) {
       // Poker-card slot (match card aspect ratio) - ultra compact
       const cell = el('div', 'h-[70px] w-[50px] sm:h-[80px] sm:w-[58px] rounded-lg border-2 border-white/10 bg-white/5 flex items-center justify-center transition-colors');
       
@@ -6784,7 +6790,8 @@ async function revealRound() {
         cell.appendChild(el('div', 'text-xs sm:text-sm text-emerald-100/30 font-bold pointer-events-none', '＋'));
       } else {
         const selected = clientState.pick?.zone==='slot' && clientState.pick.slot===slotName && clientState.pick.idx===idx;
-        const btn = renderCard(c, {variant:'slot', selected});
+        const jokerRep = c?.s === 'J' ? jokerDisplayMap[cardKey(c)] : null;
+        const btn = renderCard(c, {variant:'slot', selected, jokerRep});
         btn.addEventListener('click', () => onPick({zone:'slot', slot: slotName, idx}));
         cell.appendChild(btn);
       }
@@ -6802,15 +6809,12 @@ async function revealRound() {
 
     function renderSlots() {
       const sizes = { head: 2, mid: 3, tail: 3 };
+      const slotJokerDisplay = { head: {}, mid: {}, tail: {} };
       const makeSlot = (id, slotName) => {
         const root = $(id);
         root.innerHTML = '';
-        for (let i=0;i<sizes[slotName];i++) root.appendChild(renderSlotCell(slotName, i));
+        for (let i=0;i<sizes[slotName];i++) root.appendChild(renderSlotCell(slotName, i, slotJokerDisplay[slotName]));
       };
-
-      makeSlot('slotHead', 'head');
-      makeSlot('slotMid', 'mid');
-      makeSlot('slotTail', 'tail');
 
       const h = clientState.arranged.head;
       const m = clientState.arranged.mid;
@@ -6841,6 +6845,11 @@ async function revealRound() {
         cycle.idx = ((cycle.idx % cfg.options.length) + cfg.options.length) % cfg.options.length;
         const current = cfg.options[cycle.idx];
         const baseLabel = current.eval.name;
+        const jokersInSlot = cfg.cards.filter(c => c?.s === 'J');
+        const reps = current.jokerAsCards || [];
+        for (let i=0; i<jokersInSlot.length; i++) {
+          if (reps[i]) slotJokerDisplay[cfg.slot][cardKey(jokersInSlot[i])] = reps[i];
+        }
         if (current.jokerAsText) {
           cfg.el.textContent = `${baseLabel}（鬼=${current.jokerAsText}）`;
           cfg.el.classList.add('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
@@ -6854,6 +6863,10 @@ async function revealRound() {
         }
         clientState.jokerCycle[cfg.slot] = cycle;
       }
+
+      makeSlot('slotHead', 'head');
+      makeSlot('slotMid', 'mid');
+      makeSlot('slotTail', 'tail');
 
       // 不再即時提示擺烏龍（允許提交；結算時才處理）
       $('foulHint').textContent = '擺烏龍：頭 > 中 或 中 > 尾（允許提交；閒家擺烏龍則本局只輸給莊家；莊家擺烏龍本局三墩全輸；報到不符亦作擺烏龍）';
