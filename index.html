@@ -737,14 +737,6 @@
 
 
              <div class="flex items-center gap-2 justify-end">
-                <span class="w-52"></span>
-                <div class="w-6 flex justify-center">
-                  <button id="btnSwapMidTail" title="中墩與尾墩互換" class="w-6 h-6 rounded-full border border-amber-300/35 bg-amber-400/15 text-amber-100 text-xs font-black leading-none hover:bg-amber-300/25 active:scale-95 transition">⇅</button>
-                </div>
-                <div class="w-[155px] sm:w-[180px]"></div>
-             </div>
-
-             <div class="flex items-center gap-2 justify-end">
                  <span id="tailEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
 
                  <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
@@ -1844,6 +1836,7 @@
 
     function openArrangeModal() {
       syncArrangeSubmitStatus();
+      ensureSingleSwapMidTailButton();
       $('arrangeModal').classList.remove('hidden');
       updateBodyOverflow();
       // ensure slots are rendered when opening
@@ -7243,6 +7236,13 @@ async function revealRound() {
       renderSlots();
     }
 
+    function ensureSingleSwapMidTailButton() {
+      const buttons = Array.from(document.querySelectorAll('#btnSwapMidTail'));
+      if (buttons.length <= 1) return buttons[0] || null;
+      for (let i = 1; i < buttons.length; i++) buttons[i].remove();
+      return buttons[0] || null;
+    }
+
     function swapMidTailArranged() {
       if (clientState.submitted) {
         toast('已提交，無法互換');
@@ -7676,7 +7676,7 @@ async function revealRound() {
       if (clientState.submitted) return toast('已提交，無法重排');
       resetArrange();
     });
-    $('btnSwapMidTail')?.addEventListener('click', () => swapMidTailArranged());
+    ensureSingleSwapMidTailButton()?.addEventListener('click', () => swapMidTailArranged());
     $('btnAutoFill').addEventListener('click', () => autoFillRandomNoFoul());
     $('btnSubmit').addEventListener('click', () => submitArrangement());
 
