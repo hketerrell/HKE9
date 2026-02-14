@@ -16,6 +16,7 @@ function compareSelectCard(a, b) {
 function eval2(cards) {
   const jokers = cards.filter((c) => c?.s === 'J').length;
   if (jokers === 0) return eval2NoJoker(cards);
+  if (jokers === 2) return { cat: 1, t: [15], name: '一對', usedJoker: true, jokerAsText: '雙鬼（15分）' };
 
   const base = cards.filter((c) => c && c.s !== 'J');
   const used = new Set(base.map(cardKey));
@@ -158,7 +159,7 @@ function compareEval(a, b) {
 function headWinPoints(e2) {
   if (e2?.cat === 1) {
     const r = Number(e2.t?.[0] || 0);
-    if (r >= 2 && r <= 14) return r;
+    if (r >= 2 && r <= 15) return r;
   }
   return 1;
 }
