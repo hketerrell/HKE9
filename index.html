@@ -733,6 +733,14 @@
              </div>
 
              <div class="flex items-center gap-2 justify-end">
+                <span class="w-52"></span>
+                <div class="w-6 flex justify-center">
+                  <button id="btnSwapMidTail" title="中墩與尾墩互換" class="w-6 h-6 rounded-full border border-amber-300/35 bg-amber-400/15 text-amber-100 text-xs font-black leading-none hover:bg-amber-300/25 active:scale-95 transition">⇅</button>
+                </div>
+                <div class="w-[155px] sm:w-[180px]"></div>
+             </div>
+
+             <div class="flex items-center gap-2 justify-end">
                  <span id="tailEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
 
                  <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
@@ -7231,6 +7239,22 @@ async function revealRound() {
       renderSlots();
     }
 
+    function swapMidTailArranged() {
+      if (clientState.submitted) {
+        toast('已提交，無法互換');
+        return;
+      }
+      const current = clientState.arranged || { head:[null,null], mid:[null,null,null], tail:[null,null,null] };
+      clientState.arranged.mid = [...(current.tail || [null, null, null])];
+      clientState.arranged.tail = [...(current.mid || [null, null, null])];
+      clearPick();
+      rebuildUsedFromHand();
+      renderGameHeader();
+      renderHand();
+      renderSlots();
+      toast('已互換中墩與尾墩');
+    }
+
     function autoFillRandomNoFoul() {
       if (clientState.submitted) return;
 
@@ -7646,6 +7670,7 @@ async function revealRound() {
       if (clientState.submitted) return toast('已提交，無法重排');
       resetArrange();
     });
+    $('btnSwapMidTail')?.addEventListener('click', () => swapMidTailArranged());
     $('btnAutoFill').addEventListener('click', () => autoFillRandomNoFoul());
     $('btnSubmit').addEventListener('click', () => submitArrangement());
 
