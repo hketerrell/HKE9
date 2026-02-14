@@ -6801,7 +6801,7 @@ async function revealRound() {
       ];
 
       for (const cfg of evalCfg) {
-        const sig = cfg.cards.map(c => cardKey(c)).join('|');
+        const sig = cfg.cards.map(c => (c ? cardKey(c) : '_')).join('|');
         const cycle = clientState.jokerCycle[cfg.slot] || { sig: '', idx: 0 };
         if (cycle.sig !== sig) {
           cycle.sig = sig;
