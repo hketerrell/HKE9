@@ -145,6 +145,74 @@ function eval3NoJoker(cards) {
   return { cat: 0, t: ranks, name: '高牌' };
 }
 
+function jokerOptions2(cards) {
+  const jokers = cards.filter((c) => c?.s === 'J').length;
+  if (jokers === 0) {
+    const e = eval2NoJoker(cards);
+    return [{ eval: e, key: `${e.cat}|${e.t.join(',')}` }];
+  }
+  if (jokers === 2) {
+    const e = { cat: 1, t: [15], name: '一對', usedJoker: true };
+    return [{ eval: e, key: `${e.cat}|${e.t.join(',')}` }];
+  }
+
+  const base = cards.filter((c) => c && c.s !== 'J');
+  const used = new Set(base.map(cardKey));
+  const full = [];
+  for (const s of SUITS) {
+    for (let r = 2; r <= 14; r += 1) {
+      const k = `${r}${s}`;
+      if (!used.has(k)) full.push({ r, s });
+    }
+  }
+
+  const uniq = new Map();
+  for (const rep of full) {
+    const h = base.concat([rep]);
+    const e = eval2NoJoker(h);
+    const key = `${e.cat}|${e.t.join(',')}`;
+    if (!uniq.has(key)) uniq.set(key, { eval: e, key });
+  }
+  return [...uniq.values()].sort((a, b) => compareEval(b.eval, a.eval));
+}
+
+function jokerOptions3(cards) {
+  const jokers = cards.filter((c) => c?.s === 'J').length;
+  if (jokers === 0) {
+    const e = eval3NoJoker(cards);
+    return [{ eval: e, key: `${e.cat}|${e.t.join(',')}` }];
+  }
+
+  const base = cards.filter((c) => c && c.s !== 'J');
+  const used = new Set(base.map(cardKey));
+  const full = [];
+  for (const s of SUITS) {
+    for (let r = 2; r <= 14; r += 1) {
+      const k = `${r}${s}`;
+      if (!used.has(k)) full.push({ r, s });
+    }
+  }
+
+  const uniq = new Map();
+  const putOption = (h) => {
+    const e = eval3NoJoker(h);
+    const key = `${e.cat}|${e.t.join(',')}`;
+    if (!uniq.has(key)) uniq.set(key, { eval: e, key });
+  };
+
+  if (jokers === 1) {
+    for (const rep of full) putOption(base.concat([rep]));
+  } else {
+    for (let i = 0; i < full.length; i += 1) {
+      for (let j = i + 1; j < full.length; j += 1) {
+        putOption(base.concat([full[i], full[j]]));
+      }
+    }
+  }
+
+  return [...uniq.values()].sort((a, b) => compareEval(b.eval, a.eval));
+}
+
 function compareEval(a, b) {
   if (a.cat !== b.cat) return a.cat - b.cat;
   const len = Math.max(a.t.length, b.t.length);
@@ -209,15 +277,47 @@ function strength3(cards) {
   return e.cat * 1e9 + (t[0] || 0) * 1e6 + (t[1] || 0) * 1e3 + (t[2] || 0);
 }
 
+function evalStrength(e, cardCount) {
+  const t = e?.t || [];
+  if (cardCount === 2) return (e?.cat || 0) * 1e9 + (t[0] || 0) * 1e6 + (t[1] || 0) * 1e3;
+  return (e?.cat || 0) * 1e9 + (t[0] || 0) * 1e6 + (t[1] || 0) * 1e3 + (t[2] || 0);
+}
+
+function resolveBestOptions(head, mid, tail) {
+  const headOptions = jokerOptions2(head);
+  const midOptions = jokerOptions3(mid);
+  const tailOptions = jokerOptions3(tail);
+  const fallback = { head: headOptions[0], mid: midOptions[0], tail: tailOptions[0] };
+  let best = null;
+
+  for (const ho of headOptions) {
+    const sh = evalStrength(ho.eval, 2);
+    for (const mo of midOptions) {
+      const sm = evalStrength(mo.eval, 3);
+      if (sh > sm) continue;
+      for (const to of tailOptions) {
+        const st = evalStrength(to.eval, 3);
+        if (sm > st) continue;
+        const key = st * 1e10 + sm * 1e5 + sh;
+        if (!best || key > best.key) best = { head: ho, mid: mo, tail: to, key };
+      }
+    }
+  }
+
+  if (!best) return fallback;
+  return { head: best.head, mid: best.mid, tail: best.tail };
+}
+
 function isAllFilled(arr) {
   return arr.every((x) => x);
 }
 
 function detectFoul(head, mid, tail) {
   if (!isAllFilled(head) || !isAllFilled(mid) || !isAllFilled(tail)) return { foul: false };
-  const sh = strength2(head);
-  const sm = strength3(mid);
-  const st = strength3(tail);
+  const resolved = resolveBestOptions(head, mid, tail);
+  const sh = evalStrength(resolved.head.eval, 2);
+  const sm = evalStrength(resolved.mid.eval, 3);
+  const st = evalStrength(resolved.tail.eval, 3);
   if (sh > sm) return { foul: true, msg: '擺烏龍：頭墩大於中墩' };
   if (sm > st) return { foul: true, msg: '擺烏龍：中墩大於尾墩' };
   return { foul: false };
@@ -246,6 +346,13 @@ function canBeStraight2(cards) {
 function validateSpecial(code, all9Cards, sub, evals) {
   const c = code || 'none';
   if (c === 'none') return { ok: true, bonus: 0 };
+
+  const arrangedCards = [
+    ...(sub?.head || []),
+    ...(sub?.mid || []),
+    ...(sub?.tail || []),
+  ].filter(Boolean);
+  if (arrangedCards.some((x) => x.s === 'J')) return { ok: false, bonus: 0 };
 
   const all = (all9Cards || []).filter(Boolean);
   const jokers = all.filter((x) => x.s === 'J').length;
@@ -431,7 +538,8 @@ function computeRoundResult({ submissions, dealerOverride }) {
   for (const id of ids) {
     const sub = submissions[id];
     if (!sub?.dealerCard) throw new Error('Missing dealer card');
-    const se = { head: eval2(sub.head), mid: eval3(sub.mid), tail: eval3(sub.tail) };
+    const resolved = resolveBestOptions(sub.head, sub.mid, sub.tail);
+    const se = { head: resolved.head.eval, mid: resolved.mid.eval, tail: resolved.tail.eval };
     evalMap[id] = se;
     const all9 = [sub.dealerCard, ...sub.head, ...sub.mid, ...sub.tail];
     const sp = validateSpecial(sub.report, all9, sub, se);
