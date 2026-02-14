@@ -350,7 +350,7 @@
                   <button id="btnUpdateApp" type="button" class="text-[11px] px-2.5 py-1.5 rounded-full bg-amber-400/15 border border-amber-200/25 text-amber-100 font-black hover:brightness-110">更新</button>
                   <button id="btnOpenScoreboard" type="button" class="text-[11px] px-2.5 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 text-emerald-50">計分版</button>
                 </div>
-                <div class="text-[11px] text-emerald-100/70">Beta</div>
+                <div id="appVersionLabel" class="text-[11px] text-emerald-100/70">—</div>
               </div>
 
               <div class="mt-2 grid gap-2">
@@ -929,6 +929,7 @@
     // -------------------- UI helpers --------------------
     // Build/version stamp (used for update check)
     const APP_BUILD = '2026-01-07-1';
+    let APP_VERSION = '';
     let swReg = null;
     let updateCheckTimer = null;
 
@@ -1158,6 +1159,26 @@
           setUpdateAvailable(true, `發現新版本：${remote}`);
         }
       } catch {}
+    }
+
+
+    async function fetchRequiredAppVersion() {
+      try {
+        const base = relayHttpUrl();
+        if (!base) return '';
+        const res = await fetch(`${base}/app-version?bust=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return '';
+        const json = await res.json();
+        const v = String(json?.requiredVersion || '').trim();
+        if (!v) return '';
+        APP_VERSION = v;
+        clientState.appVersion = v;
+        const n = $('appVersionLabel');
+        if (n) n.textContent = v;
+        return v;
+      } catch {
+        return '';
+      }
     }
 
     function startVersionPolling() {
@@ -3402,7 +3423,7 @@ function eval3NoJoker(cards) {
         if (!relaySocketOpen()) return;
         if (!relayIntent) return;
         if (relayIntent.type === 'host' || relayIntent.type === 'join') {
-          relaySocket.send(JSON.stringify({ t: 'join-room', roomId: relayIntent.roomId, name: clientState.myName }));
+          relaySocket.send(JSON.stringify({ t: 'join-room', roomId: relayIntent.roomId, name: clientState.myName, appVersion: clientState.appVersion || APP_VERSION }));
         }
       });
 
@@ -3804,6 +3825,7 @@ function eval3NoJoker(cards) {
       keepRevealOnTable: false,
       revealTableRendered: false,
       waitingForHost: false,
+      appVersion: '',
       jokerCycle: {
         head: { sig: '', idx: 0 },
         mid: { sig: '', idx: 0 },
@@ -7305,7 +7327,7 @@ async function revealRound() {
       joinRoom(custom.toUpperCase());
     }
 
-    function joinRoom(roomId) {
+    async function joinRoom(roomId) {
       // stop previous keepalive/reconnect
       try { stopClientHeartbeat(); } catch {}
       try {
@@ -7317,6 +7339,13 @@ async function revealRound() {
       clientReconnectAttempts = 0;
 
       ensureName();
+      if (!(clientState.appVersion || APP_VERSION)) {
+        await fetchRequiredAppVersion();
+      }
+      if (!(clientState.appVersion || APP_VERSION)) {
+        toast('無法取得伺服器版本，請稍後再試');
+        return;
+      }
       let rid = String(roomId || '').trim();
       // remove invisible spaces that may break peer id parsing
       rid = rid.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
@@ -7781,6 +7810,12 @@ async function revealRound() {
       if (room) {
         $('inpRoomId').value = room;
       }
+
+      try {
+        const n = $('appVersionLabel');
+        if (n) n.textContent = '—';
+      } catch {}
+      void fetchRequiredAppVersion();
 
       // Load bottom bar collapsed state (default: collapsed)
       try {
