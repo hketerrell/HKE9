@@ -1276,6 +1276,7 @@
     const DRIVE_API_KEY = 'AIzaSyDvioGAwurZtmD-rWV3bIyWv60UtanMimI'; // optional: put your Google API key here to enable Drive lookup
 
     const ICON_FALLBACK_BASE = 'https://cdn.jsdelivr.net/gh/hketerrell/HKE9@main/icon/';
+    const ICON_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg', 'gif', 'svg'];
 
     const iconCache = new Map(); // name -> 'ok' | 'fail'
     let driveIconIndex = null; // name -> fileId
@@ -1317,6 +1318,23 @@
       return driveIconUrls(fileId)[0];
     }
 
+    function iconFileCandidates(name) {
+      const base = String(name || '').trim();
+      if (!base) return [];
+      const files = [];
+      for (const ext of ICON_EXTENSIONS) {
+        files.push(`${base}.${ext}`);
+        files.push(`${base}.${ext.toUpperCase()}`);
+      }
+      return Array.from(new Set(files));
+    }
+
+    function fallbackIconUrls(name) {
+      const n = String(name || '').trim();
+      if (!n) return [];
+      return ICON_EXTENSIONS.map((ext) => ICON_FALLBACK_BASE + encodeURIComponent(n) + '.' + ext);
+    }
+
     async function resolveDriveFileIdByName(name) {
       const n = String(name || '').trim();
       if (!n) return null;
@@ -1343,8 +1361,7 @@
       }
 
       // Escape single quotes for Drive query
-      const safeBase = n.replace(/'/g, "\\'");
-      const candidates = [`${safeBase}.png`, `${safeBase}.PNG`, `${safeBase}.Png`];
+      const candidates = iconFileCandidates(n).map((fileName) => fileName.replace(/'/g, "\\'"));
 
       for (const fileName of candidates) {
         const q = `'${DRIVE_FOLDER_ID}' in parents and trashed=false and name='${fileName}'`;
@@ -1391,7 +1408,7 @@
         }
       }
 
-      dlog(`Drive icon: not found for ${n} (no matching png in folder)`);
+      dlog(`Drive icon: not found for ${n} (no matching supported image format in folder)`);
       return null;
     }
 
@@ -1401,7 +1418,7 @@
       const idx = loadDriveIconIndex();
       if (idx[n]) return driveIconUrl(idx[n]);
       // fallback (used when no Drive API key / not resolved yet)
-      return ICON_FALLBACK_BASE + encodeURIComponent(n) + '.png';
+      return fallbackIconUrls(n)[0] || '';
     }
 
     function createPlayerIconNode(name) {
@@ -1424,12 +1441,12 @@
       let loaded = false;
       let mode = cachedDriveId ? 'drive' : 'fallback';
       let driveTry = { id: cachedDriveId, urls: cachedDriveId ? driveIconUrls(cachedDriveId) : [], i: 0 };
-
-      const fallbackUrl = ICON_FALLBACK_BASE + encodeURIComponent(n) + '.png';
+      let fallbackTry = { urls: fallbackIconUrls(n), i: 0 };
 
       const setFallback = () => {
         mode = 'fallback';
-        img.src = fallbackUrl;
+        if (fallbackTry.i >= fallbackTry.urls.length) return;
+        img.src = fallbackTry.urls[fallbackTry.i++];
       };
 
       const tryNextDriveUrl = () => {
@@ -1460,7 +1477,7 @@
           }
 
           dlog(`Drive icon: image timeout (all URL variants), fallback => ${n}`);
-          dlog(`Drive icon hint: check file permission (Anyone with the link can view) for ${n}.png`);
+          dlog(`Drive icon hint: check file permission (Anyone with the link can view) for ${n}.*`);
 
           // Delete cached id (to avoid repeated failures) and fall back
           try {
@@ -1504,7 +1521,7 @@
           }
 
           dlog(`Drive icon: image failed (all URL variants), fallback => ${n}`);
-          dlog(`Drive icon hint: check file permission (Anyone with the link can view) for ${n}.png`);
+          dlog(`Drive icon hint: check file permission (Anyone with the link can view) for ${n}.*`);
 
           // Delete cached id (to avoid repeated failures) and fall back
           try {
@@ -1521,8 +1538,14 @@
           return;
         }
 
+        // fallback: try next extension
+        if (fallbackTry.i < fallbackTry.urls.length) {
+          setFallback();
+          return;
+        }
+
         // fallback failed too
-        dlog(`Icon fallback failed => ${n} (${fallbackUrl})`);
+        dlog(`Icon fallback failed => ${n} (${fallbackTry.urls.join(', ')})`);
         iconCache.set(n, 'fail');
         // Keep a minimal text placeholder instead of removing the node,
         // so the seat layout stays stable.
