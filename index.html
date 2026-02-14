@@ -704,7 +704,7 @@
          <div class="flex flex-col justify-center gap-6 select-none h-full w-auto">
              
              <div class="flex items-center gap-2 justify-end">
-                <span id="headEval" class="text-[10px] font-bold text-emerald-200/80 w-12 text-right tabular-nums tracking-tighter">—</span>
+                <span id="headEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
                 
                 <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
                     <span>頭</span><span>墩</span>
@@ -714,7 +714,7 @@
              </div>
 
              <div class="flex items-center gap-2 justify-end">
-                <span id="midEval" class="text-[10px] font-bold text-emerald-200/80 w-12 text-right tabular-nums tracking-tighter">—</span>
+                <span id="midEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
 
                 <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
                     <span>中</span><span>墩</span>
@@ -723,7 +723,7 @@
              </div>
 
              <div class="flex items-center gap-2 justify-end">
-                 <span id="tailEval" class="text-[10px] font-bold text-emerald-200/80 w-12 text-right tabular-nums tracking-tighter">—</span>
+                 <span id="tailEval" class="text-[10px] font-bold text-emerald-200/80 w-52 text-right tabular-nums tracking-tighter">—</span>
 
                  <div class="flex flex-col items-center justify-center text-[10px] font-bold text-emerald-100/50 leading-none gap-0.5">
                     <span>尾</span><span>墩</span>
@@ -2764,6 +2764,7 @@
       return `${rtxt}${SUIT_ICON[c.s]}`;
     }
 
+
     function cardKey(c) {
       if (c.s==='J') return c.j;
       return `${c.r}${c.s}`;
@@ -2790,6 +2791,9 @@
     function eval2(cards) {
       const jokers = cards.filter(c => c?.s==='J').length;
       if (jokers === 0) return eval2NoJoker(cards);
+      if (jokers === 2) {
+        return {cat: 1, t: [15], name: '一對', usedJoker: true, jokerAsText: '雙鬼（15分）'};
+      }
 
       const base = cards.filter(c => c && c.s!=='J');
       const used = new Set(base.map(cardKey));
@@ -2922,12 +2926,88 @@ function eval3NoJoker(cards) {
       return 0;
     }
 
+    function jokerOptions2(cards) {
+      const jokers = cards.filter(c => c?.s === 'J').length;
+      if (jokers === 0) {
+        const e = eval2NoJoker(cards);
+        return [{eval: e, jokerAsText: '', key: `${e.cat}|${e.t.join(',')}`}];
+      }
+      if (jokers === 2) {
+        const e = {cat: 1, t: [15], name: '一對', usedJoker: true};
+        return [{eval: e, jokerAsText: '雙鬼（15分）', key: `${e.cat}|${e.t.join(',')}`}];
+      }
+
+      const base = cards.filter(c => c && c.s !== 'J');
+      const used = new Set(base.map(cardKey));
+      const full = [];
+      for (const s of SUITS) {
+        for (let r=2;r<=14;r++) {
+          const k = `${r}${s}`;
+          if (!used.has(k)) full.push({r,s});
+        }
+      }
+
+      const uniq = new Map();
+      for (const rep of full) {
+        const h = base.concat([rep]);
+        const e = eval2NoJoker(h);
+        const key = `${e.cat}|${e.t.join(',')}`;
+        if (!uniq.has(key)) {
+          uniq.set(key, {eval: e, jokerAsText: cardLabel(rep), key});
+        }
+      }
+      return [...uniq.values()].sort((a,b) => compareEval(b.eval, a.eval));
+    }
+
+    function jokerOptions3(cards) {
+      const jokers = cards.filter(c => c?.s === 'J').length;
+      if (jokers === 0) {
+        const e = eval3NoJoker(cards);
+        return [{eval: e, jokerAsText: '', key: `${e.cat}|${e.t.join(',')}`}];
+      }
+
+      const base = cards.filter(c => c && c.s !== 'J');
+      const used = new Set(base.map(cardKey));
+      const full = [];
+      for (const s of SUITS) {
+        for (let r=2;r<=14;r++) {
+          const k = `${r}${s}`;
+          if (!used.has(k)) full.push({r,s});
+        }
+      }
+
+      const uniq = new Map();
+      const putOption = (h, reps) => {
+        const e = eval3NoJoker(h);
+        const key = `${e.cat}|${e.t.join(',')}`;
+        if (!uniq.has(key)) {
+          uniq.set(key, {
+            eval: e,
+            jokerAsText: reps.map(cardLabel).join(' + '),
+            key,
+          });
+        }
+      };
+
+      if (jokers === 1) {
+        for (const rep of full) putOption(base.concat([rep]), [rep]);
+      } else {
+        for (let i=0;i<full.length;i++) {
+          for (let j=i+1;j<full.length;j++) {
+            putOption(base.concat([full[i], full[j]]), [full[i], full[j]]);
+          }
+        }
+      }
+
+      return [...uniq.values()].sort((a,b) => compareEval(b.eval, a.eval));
+    }
+
     // -------------------- Scoring helpers (vs dealer) --------------------
     // 頭墩：若勝方為一對，該墩得分 = 對子點數（2~14）；否則勝方得 1。
     function headWinPoints(e2) {
       if (e2?.cat === 1) {
         const r = Number(e2.t?.[0] || 0);
-        if (r >= 2 && r <= 14) return r;
+        if (r >= 2 && r <= 15) return r;
       }
       return 1;
     }
@@ -3724,6 +3804,11 @@ function eval3NoJoker(cards) {
       keepRevealOnTable: false,
       revealTableRendered: false,
       waitingForHost: false,
+      jokerCycle: {
+        head: { sig: '', idx: 0 },
+        mid: { sig: '', idx: 0 },
+        tail: { sig: '', idx: 0 },
+      },
     };
 
     // -------------------- Persisted room record (DAY/MON) via Render API(PostgreSQL) --------------------
@@ -6708,9 +6793,45 @@ async function revealRound() {
       const h = clientState.arranged.head;
       const m = clientState.arranged.mid;
       const t = clientState.arranged.tail;
-      $('headEval').textContent = isAllFilled(h) ? eval2(h).name : '—';
-      $('midEval').textContent = isAllFilled(m) ? eval3(m).name : '—';
-      $('tailEval').textContent = isAllFilled(t) ? eval3(t).name : '—';
+
+      const evalCfg = [
+        { slot: 'head', el: $('headEval'), cards: h, filled: isAllFilled(h), options: isAllFilled(h) ? jokerOptions2(h) : [] },
+        { slot: 'mid', el: $('midEval'), cards: m, filled: isAllFilled(m), options: isAllFilled(m) ? jokerOptions3(m) : [] },
+        { slot: 'tail', el: $('tailEval'), cards: t, filled: isAllFilled(t), options: isAllFilled(t) ? jokerOptions3(t) : [] },
+      ];
+
+      for (const cfg of evalCfg) {
+        const sig = cfg.cards.map(c => cardKey(c)).join('|');
+        const cycle = clientState.jokerCycle[cfg.slot] || { sig: '', idx: 0 };
+        if (cycle.sig !== sig) {
+          cycle.sig = sig;
+          cycle.idx = 0;
+        }
+
+        if (!cfg.filled || !cfg.options.length) {
+          cfg.el.textContent = '—';
+          cfg.el.classList.remove('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
+          cfg.el.removeAttribute('title');
+          clientState.jokerCycle[cfg.slot] = cycle;
+          continue;
+        }
+
+        cycle.idx = ((cycle.idx % cfg.options.length) + cfg.options.length) % cfg.options.length;
+        const current = cfg.options[cycle.idx];
+        const baseLabel = current.eval.name;
+        if (current.jokerAsText) {
+          cfg.el.textContent = `${baseLabel}（鬼=${current.jokerAsText}）`;
+          cfg.el.classList.add('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
+          cfg.el.title = cfg.options.length > 1
+            ? `點擊切換鬼牌可能性（${cycle.idx + 1}/${cfg.options.length}）`
+            : '鬼牌目前視為此牌型';
+        } else {
+          cfg.el.textContent = baseLabel;
+          cfg.el.classList.remove('cursor-pointer', 'underline', 'underline-offset-2', 'decoration-dotted');
+          cfg.el.removeAttribute('title');
+        }
+        clientState.jokerCycle[cfg.slot] = cycle;
+      }
 
       // 不再即時提示擺烏龍（允許提交；結算時才處理）
       $('foulHint').textContent = '擺烏龍：頭 > 中 或 中 > 尾（允許提交；閒家擺烏龍則本局只輸給莊家；莊家擺烏龍本局三墩全輸；報到不符亦作擺烏龍）';
@@ -7485,6 +7606,19 @@ async function revealRound() {
     $('btnCloseArrange').addEventListener('click', closeArrangeModal);
     $('btnCloseArrange2')?.addEventListener('click', closeArrangeModal);
     $('arrangeBackdrop').addEventListener('click', closeArrangeModal);
+
+    const bindJokerCycle = (slot, id) => {
+      $(id)?.addEventListener('click', () => {
+        if (clientState.submitted) return;
+        const cycle = clientState.jokerCycle[slot];
+        if (!cycle || !cycle.sig) return;
+        cycle.idx += 1;
+        renderSlots();
+      });
+    };
+    bindJokerCycle('head', 'headEval');
+    bindJokerCycle('mid', 'midEval');
+    bindJokerCycle('tail', 'tailEval');
 
     // Table center button is re-created by renderTableSeats(); its click handler is bound there.
 
