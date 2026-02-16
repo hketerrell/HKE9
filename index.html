@@ -250,6 +250,43 @@
       background: rgba(2,6,23,.25);
     }
 
+    /* Self icon underwear effect */
+    .self-undie {
+      position: absolute;
+      left: 50%;
+      bottom: -2px;
+      width: 26px;
+      height: 14px;
+      transform: translateX(-50%);
+      border-radius: 8px 8px 5px 5px;
+      border: 1px solid rgba(255,255,255,.65);
+      box-shadow: 0 2px 8px rgba(0,0,0,.35);
+      pointer-events: none;
+      z-index: 7;
+    }
+    .self-undie::before,
+    .self-undie::after {
+      content: '';
+      position: absolute;
+      top: -1px;
+      width: 8px;
+      height: 11px;
+      border-top: 2px solid rgba(255,255,255,.8);
+      border-left: 1px solid rgba(255,255,255,.6);
+      border-right: 1px solid rgba(255,255,255,.6);
+      border-radius: 6px 6px 3px 3px;
+      background: inherit;
+    }
+    .self-undie::before { left: 0px; }
+    .self-undie::after { right: 0px; }
+    .self-undie.neg { background: linear-gradient(180deg, #fb7185, #be123c); }
+    .self-undie.pos {
+      background: linear-gradient(180deg, #4ade80, #15803d);
+      transform: translateX(-50%) rotate(180deg);
+      bottom: auto;
+      top: -2px;
+    }
+
     /* Table scene */
     .table-felt {
       background:
@@ -3991,6 +4028,7 @@ function eval3NoJoker(cards) {
       revealTableRendered: false,
       waitingForHost: false,
       appVersion: '',
+      selfUndieEnabled: false,
     };
 
     // -------------------- Persisted room record (DAY/MON) via Render API(PostgreSQL) --------------------
@@ -6252,6 +6290,16 @@ async function revealRound() {
           }
 
           iconRow.appendChild(iconNode);
+
+          const selfId3 = isHost ? hostId : myId;
+          if (clientState.selfUndieEnabled && selfId3 && p.id === selfId3) {
+            const scoreNow = Number(clientState.cumulative?.[selfId3] || 0);
+            if (scoreNow !== 0) {
+              iconNode.classList.add('relative');
+              const undie = el('div', 'self-undie ' + (scoreNow > 0 ? 'pos' : 'neg'));
+              iconNode.appendChild(undie);
+            }
+          }
         }
 
         const dealerBadge = el('div', 'hidden text-[10px] px-1.5 py-0.5 rounded-md bg-black/35 border border-amber-200/20 text-amber-100 font-black mono');
@@ -6301,10 +6349,24 @@ async function revealRound() {
 
         badge.addEventListener('click', (e) => {
           e.preventDefault();
-          // clicking self seat does nothing
           const targetId = p.id;
           const selfId2 = isHost ? hostId : myId;
-          if (!targetId || !selfId2 || targetId === selfId2) return;
+          if (!targetId || !selfId2) return;
+
+          if (targetId === selfId2) {
+            const scoreNow = Number(clientState.cumulative?.[selfId2] || 0);
+            if (scoreNow === 0) {
+              clientState.selfUndieEnabled = false;
+              toast('目前 0 分，暫時唔使著底褲');
+            } else {
+              clientState.selfUndieEnabled = !clientState.selfUndieEnabled;
+              const modeText = scoreNow > 0 ? '綠色倒轉底褲' : '紅色底褲';
+              toast(clientState.selfUndieEnabled ? `已著上${modeText}` : '已除底褲');
+            }
+            renderTableSeats();
+            return;
+          }
+
           sendPoopTo(targetId);
         });
 
