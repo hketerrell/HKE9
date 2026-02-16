@@ -308,40 +308,40 @@
 
     @keyframes cutDeckTopStack {
       0% {
-        transform: translate(-50%, -50%) rotate(-2deg);
+        transform: translate(-50%, -50%) rotate(0deg);
         opacity: 0;
       }
-      14% { opacity: 1; }
+      12% { opacity: 1; }
       34% {
-        transform: translate(-50%, calc(-50% - 30px)) rotate(-6deg);
+        transform: translate(-50%, calc(-50% - 10px)) rotate(0deg);
       }
-      62% {
-        transform: translate(calc(-50% + 28px), calc(-50% + 4px)) rotate(4deg);
+      64% {
+        transform: translate(calc(-50% + 42px), calc(-50% - 8px)) rotate(0deg);
       }
-      82% {
-        transform: translate(-50%, calc(-50% + 14px)) rotate(2deg);
+      84% {
+        transform: translate(-50%, calc(-50% + 6px)) rotate(0deg);
         opacity: 1;
       }
       100% {
-        transform: translate(-50%, -50%) rotate(-2deg);
+        transform: translate(-50%, -50%) rotate(0deg);
         opacity: 0;
       }
     }
 
     @keyframes cutDeckBottomStack {
       0% {
-        transform: translate(-50%, -50%) rotate(1deg);
+        transform: translate(-50%, -50%) rotate(0deg);
         opacity: 0;
       }
-      14% { opacity: 1; }
+      12% { opacity: 1; }
       40% {
-        transform: translate(-50%, calc(-50% + 8px)) rotate(1deg);
+        transform: translate(-50%, calc(-50% + 5px)) rotate(0deg);
       }
       70% {
-        transform: translate(calc(-50% - 10px), calc(-50% + 8px)) rotate(0deg);
+        transform: translate(calc(-50% - 16px), calc(-50% + 5px)) rotate(0deg);
       }
       100% {
-        transform: translate(-50%, -50%) rotate(1deg);
+        transform: translate(-50%, -50%) rotate(0deg);
         opacity: 0;
       }
     }
@@ -350,14 +350,13 @@
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 92px;
-      height: 126px;
-      border-radius: 12px;
-      border: 1px solid rgba(251,191,36,.52);
+      width: 138px;
+      height: 84px;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,.68);
       background:
-        radial-gradient(circle at 26% 20%, rgba(251,191,36,.36), transparent 58%),
-        linear-gradient(145deg, rgba(15,23,42,.96), rgba(30,41,59,.96));
-      box-shadow: 0 14px 30px rgba(0,0,0,.48);
+        linear-gradient(155deg, rgba(30,41,59,.94), rgba(15,23,42,.94));
+      box-shadow: 0 14px 26px rgba(2,6,23,.52);
       pointer-events: none;
       z-index: 44;
     }
@@ -365,28 +364,33 @@
     .cut-deck-stack::before {
       content: '';
       position: absolute;
-      inset: 5px;
-      border-radius: 9px;
-      border: 1px solid rgba(250,204,21,.22);
-      background: linear-gradient(140deg, rgba(30,41,59,.35), rgba(2,6,23,.15));
+      inset: 4px;
+      border-radius: 8px;
+      border: 1px solid rgba(191,219,254,.26);
+      background: linear-gradient(160deg, rgba(59,130,246,.26), rgba(15,23,42,.12));
     }
 
     .cut-deck-stack::after {
       content: '';
       position: absolute;
-      left: 8px;
-      right: -6px;
+      left: 4px;
+      right: -8px;
       bottom: -8px;
-      height: 14px;
-      border-radius: 0 0 10px 10px;
+      height: 12px;
+      border-radius: 0 0 8px 8px;
       background:
         repeating-linear-gradient(
           to right,
-          rgba(248,250,252,.78) 0 2px,
+          rgba(241,245,249,.82) 0 2px,
           rgba(226,232,240,.66) 2px 4px
         );
-      border: 1px solid rgba(248,250,252,.46);
-      box-shadow: 0 4px 8px rgba(0,0,0,.28);
+      border: 1px solid rgba(226,232,240,.52);
+      box-shadow: 0 3px 7px rgba(0,0,0,.24);
+    }
+
+    #tableSeats.cut-animating #btnOpenActionMenu {
+      opacity: 0;
+      pointer-events: none;
     }
 
     .cut-deck-stack.top { animation: cutDeckTopStack 980ms cubic-bezier(.2,.85,.2,1) forwards; }
@@ -6034,6 +6038,7 @@ async function revealRound() {
     function playCutDeckAnimation(root) {
       if (!root) return;
       root.querySelectorAll('.cut-deck-stack').forEach(node => node.remove());
+      root.classList.add('cut-animating');
 
       const topStack = document.createElement('div');
       topStack.className = 'cut-deck-stack top';
@@ -6041,13 +6046,13 @@ async function revealRound() {
       const bottomStack = document.createElement('div');
       bottomStack.className = 'cut-deck-stack bottom';
 
-      // 先放底疊、再放上疊，確保視覺層次像「整疊被切開」
       root.appendChild(bottomStack);
       root.appendChild(topStack);
 
       setTimeout(() => {
         topStack.remove();
         bottomStack.remove();
+        root.classList.remove('cut-animating');
       }, 1060);
     }
 
