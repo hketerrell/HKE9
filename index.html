@@ -306,6 +306,95 @@
       will-change: left, top, transform;
     }
 
+    @keyframes cutDeckTopStack {
+      0% {
+        transform: translate(-50%, -50%) rotate(0deg);
+        opacity: 0;
+      }
+      12% { opacity: 1; }
+      34% {
+        transform: translate(-50%, calc(-50% - 10px)) rotate(0deg);
+      }
+      64% {
+        transform: translate(calc(-50% + 42px), calc(-50% - 8px)) rotate(0deg);
+      }
+      84% {
+        transform: translate(-50%, calc(-50% + 6px)) rotate(0deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(-50%, -50%) rotate(0deg);
+        opacity: 0;
+      }
+    }
+
+    @keyframes cutDeckBottomStack {
+      0% {
+        transform: translate(-50%, -50%) rotate(0deg);
+        opacity: 0;
+      }
+      12% { opacity: 1; }
+      40% {
+        transform: translate(-50%, calc(-50% + 5px)) rotate(0deg);
+      }
+      70% {
+        transform: translate(calc(-50% - 16px), calc(-50% + 5px)) rotate(0deg);
+      }
+      100% {
+        transform: translate(-50%, -50%) rotate(0deg);
+        opacity: 0;
+      }
+    }
+
+    .cut-deck-stack {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 138px;
+      height: 84px;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,.68);
+      background:
+        linear-gradient(155deg, rgba(30,41,59,.94), rgba(15,23,42,.94));
+      box-shadow: 0 14px 26px rgba(2,6,23,.52);
+      pointer-events: none;
+      z-index: 44;
+    }
+
+    .cut-deck-stack::before {
+      content: '';
+      position: absolute;
+      inset: 4px;
+      border-radius: 8px;
+      border: 1px solid rgba(191,219,254,.26);
+      background: linear-gradient(160deg, rgba(59,130,246,.26), rgba(15,23,42,.12));
+    }
+
+    .cut-deck-stack::after {
+      content: '';
+      position: absolute;
+      left: 6px;
+      right: 6px;
+      bottom: -6px;
+      height: 8px;
+      border-radius: 0 0 8px 8px;
+      background: linear-gradient(
+        to bottom,
+        rgba(148,163,184,.25),
+        rgba(15,23,42,.2)
+      );
+      border: 1px solid rgba(148,163,184,.22);
+      box-shadow: 0 4px 8px rgba(2,6,23,.22);
+    }
+
+    #tableSeats.cut-animating #btnOpenActionMenu {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .cut-deck-stack.top { animation: cutDeckTopStack 980ms cubic-bezier(.2,.85,.2,1) forwards; }
+    .cut-deck-stack.bottom { animation: cutDeckBottomStack 980ms cubic-bezier(.2,.85,.2,1) forwards; }
+
     /* Hand dock safe-area */
     .hand-dock {
       padding-bottom: env(safe-area-inset-bottom);
@@ -5945,6 +6034,27 @@ async function revealRound() {
       return out;
     }
 
+    function playCutDeckAnimation(root) {
+      if (!root) return;
+      root.querySelectorAll('.cut-deck-stack').forEach(node => node.remove());
+      root.classList.add('cut-animating');
+
+      const topStack = document.createElement('div');
+      topStack.className = 'cut-deck-stack top';
+
+      const bottomStack = document.createElement('div');
+      bottomStack.className = 'cut-deck-stack bottom';
+
+      root.appendChild(bottomStack);
+      root.appendChild(topStack);
+
+      setTimeout(() => {
+        topStack.remove();
+        bottomStack.remove();
+        root.classList.remove('cut-animating');
+      }, 1060);
+    }
+
     function renderTableSeats() {
       const root = $('tableSeats');
       if (!root) return;
@@ -5977,6 +6087,8 @@ async function revealRound() {
       // 房主看 hostState.revealed，玩家看 clientState.lastReveal
       const isRoundOver = roundOverForUi();
       const started = (isHost ? (hostState.round > 0) : (clientState.round > 0));
+
+      const hasDealt = (clientState.cards9 && clientState.cards9.length);
 
       if (isRoundOver) {
           const readyMap = nextReadyMapForUi() || {};
@@ -6027,7 +6139,6 @@ async function revealRound() {
             }
           }
       } else {
-          const hasDealt = (clientState.cards9 && clientState.cards9.length);
           const started2 = (isHost ? (hostState.round > 0) : (clientState.round > 0));
 
           centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition';
@@ -6061,6 +6172,24 @@ async function revealRound() {
       }
 
       root.appendChild(centerBtn);
+
+      const selfIdForCut = isHost ? hostId : myId;
+      const preGameReadyMap = isHost ? readyMapForBroadcast() : (clientState.readyMap || {});
+      const roundReadyMap = nextReadyMapForUi() || {};
+      const inPrepareStage = (!started && !hasDealt) || isRoundOver;
+      const selfPrepared = isRoundOver
+        ? !!roundReadyMap[selfIdForCut]
+        : !!preGameReadyMap[selfIdForCut];
+
+      if (inPrepareStage && selfPrepared) {
+        const cutBtn = document.createElement('button');
+        cutBtn.type = 'button';
+        cutBtn.id = 'btnCutDeck';
+        cutBtn.className = 'absolute left-1/2 top-1/2 ml-24 -translate-y-1/2 rounded-full px-4 py-2 text-xs chip text-amber-100 border border-amber-200/30 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
+        cutBtn.textContent = 'cut牌';
+        cutBtn.addEventListener('click', () => playCutDeckAnimation(root));
+        root.appendChild(cutBtn);
+      }
 
       // Choose a smaller radius on narrow screens to avoid seats going out of bounds
       const rect = root.getBoundingClientRect();
