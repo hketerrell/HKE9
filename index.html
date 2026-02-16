@@ -311,12 +311,15 @@
         transform: translate(-50%, -50%) rotate(-2deg);
         opacity: 0;
       }
-      18% { opacity: 1; }
-      36% {
-        transform: translate(-50%, calc(-50% - 20px)) rotate(-5deg);
+      14% { opacity: 1; }
+      34% {
+        transform: translate(-50%, calc(-50% - 30px)) rotate(-6deg);
       }
-      68% {
-        transform: translate(calc(-50% + 50px), calc(-50% - 2px)) rotate(7deg);
+      62% {
+        transform: translate(calc(-50% + 28px), calc(-50% + 4px)) rotate(4deg);
+      }
+      82% {
+        transform: translate(-50%, calc(-50% + 14px)) rotate(2deg);
         opacity: 1;
       }
       100% {
@@ -330,13 +333,12 @@
         transform: translate(-50%, -50%) rotate(1deg);
         opacity: 0;
       }
-      18% { opacity: 1; }
-      36% {
+      14% { opacity: 1; }
+      40% {
         transform: translate(-50%, calc(-50% + 8px)) rotate(1deg);
       }
-      68% {
-        transform: translate(calc(-50% - 50px), calc(-50% + 10px)) rotate(-6deg);
-        opacity: 1;
+      70% {
+        transform: translate(calc(-50% - 10px), calc(-50% + 8px)) rotate(0deg);
       }
       100% {
         transform: translate(-50%, -50%) rotate(1deg);
@@ -348,38 +350,47 @@
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 80px;
-      height: 112px;
+      width: 92px;
+      height: 126px;
       border-radius: 12px;
-      border: 1px solid rgba(251,191,36,.55);
+      border: 1px solid rgba(251,191,36,.52);
       background:
-        radial-gradient(circle at 26% 22%, rgba(251,191,36,.38), transparent 58%),
-        linear-gradient(145deg, rgba(15,23,42,.95), rgba(30,41,59,.95));
+        radial-gradient(circle at 26% 20%, rgba(251,191,36,.36), transparent 58%),
+        linear-gradient(145deg, rgba(15,23,42,.96), rgba(30,41,59,.96));
       box-shadow: 0 14px 30px rgba(0,0,0,.48);
       pointer-events: none;
       z-index: 44;
+    }
+
+    .cut-deck-stack::before {
+      content: '';
+      position: absolute;
+      inset: 5px;
+      border-radius: 9px;
+      border: 1px solid rgba(250,204,21,.22);
+      background: linear-gradient(140deg, rgba(30,41,59,.35), rgba(2,6,23,.15));
     }
 
     .cut-deck-stack::after {
       content: '';
       position: absolute;
       left: 8px;
-      right: -5px;
-      bottom: -7px;
-      height: 12px;
+      right: -6px;
+      bottom: -8px;
+      height: 14px;
       border-radius: 0 0 10px 10px;
       background:
         repeating-linear-gradient(
           to right,
-          rgba(248,250,252,.75) 0 2px,
-          rgba(226,232,240,.68) 2px 4px
+          rgba(248,250,252,.78) 0 2px,
+          rgba(226,232,240,.66) 2px 4px
         );
-      border: 1px solid rgba(248,250,252,.45);
+      border: 1px solid rgba(248,250,252,.46);
       box-shadow: 0 4px 8px rgba(0,0,0,.28);
     }
 
-    .cut-deck-stack.top { animation: cutDeckTopStack 900ms cubic-bezier(.2,.85,.2,1) forwards; }
-    .cut-deck-stack.bottom { animation: cutDeckBottomStack 900ms cubic-bezier(.2,.85,.2,1) forwards; }
+    .cut-deck-stack.top { animation: cutDeckTopStack 980ms cubic-bezier(.2,.85,.2,1) forwards; }
+    .cut-deck-stack.bottom { animation: cutDeckBottomStack 980ms cubic-bezier(.2,.85,.2,1) forwards; }
 
     /* Hand dock safe-area */
     .hand-dock {
@@ -6030,13 +6041,14 @@ async function revealRound() {
       const bottomStack = document.createElement('div');
       bottomStack.className = 'cut-deck-stack bottom';
 
+      // 先放底疊、再放上疊，確保視覺層次像「整疊被切開」
       root.appendChild(bottomStack);
       root.appendChild(topStack);
 
       setTimeout(() => {
         topStack.remove();
         bottomStack.remove();
-      }, 960);
+      }, 1060);
     }
 
     function renderTableSeats() {
@@ -6157,8 +6169,15 @@ async function revealRound() {
 
       root.appendChild(centerBtn);
 
-      const preDealSelfReady = (!isHost && !started && !hasDealt && !!(clientState.readyMap || {})[myId]);
-      if (preDealSelfReady) {
+      const selfIdForCut = isHost ? hostId : myId;
+      const preGameReadyMap = isHost ? readyMapForBroadcast() : (clientState.readyMap || {});
+      const roundReadyMap = nextReadyMapForUi() || {};
+      const inPrepareStage = (!started && !hasDealt) || isRoundOver;
+      const selfPrepared = isRoundOver
+        ? !!roundReadyMap[selfIdForCut]
+        : !!preGameReadyMap[selfIdForCut];
+
+      if (inPrepareStage && selfPrepared) {
         const cutBtn = document.createElement('button');
         cutBtn.type = 'button';
         cutBtn.id = 'btnCutDeck';
