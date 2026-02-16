@@ -306,6 +306,39 @@
       will-change: left, top, transform;
     }
 
+    @keyframes cutDeckTop {
+      0% { transform: translate(-50%, -50%) rotate(-3deg); opacity: 0; }
+      20% { opacity: 1; }
+      60% { transform: translate(calc(-50% - 34px), calc(-50% - 12px)) rotate(-7deg); opacity: 1; }
+      100% { transform: translate(-50%, -50%) rotate(-3deg); opacity: 0; }
+    }
+
+    @keyframes cutDeckBottom {
+      0% { transform: translate(-50%, -50%) rotate(3deg); opacity: 0; }
+      20% { opacity: 1; }
+      60% { transform: translate(calc(-50% + 34px), calc(-50% + 12px)) rotate(7deg); opacity: 1; }
+      100% { transform: translate(-50%, -50%) rotate(3deg); opacity: 0; }
+    }
+
+    .cut-card-half {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 72px;
+      height: 96px;
+      border-radius: 12px;
+      border: 1px solid rgba(251,191,36,.45);
+      background:
+        radial-gradient(circle at 20% 20%, rgba(251,191,36,.45), transparent 55%),
+        linear-gradient(140deg, rgba(15,23,42,.92), rgba(30,41,59,.92));
+      box-shadow: 0 12px 28px rgba(0,0,0,.45);
+      pointer-events: none;
+      z-index: 44;
+    }
+
+    .cut-card-half.top { animation: cutDeckTop 700ms ease-out forwards; }
+    .cut-card-half.bottom { animation: cutDeckBottom 700ms ease-out forwards; }
+
     /* Hand dock safe-area */
     .hand-dock {
       padding-bottom: env(safe-area-inset-bottom);
@@ -5945,6 +5978,25 @@ async function revealRound() {
       return out;
     }
 
+    function playCutDeckAnimation(root) {
+      if (!root) return;
+      root.querySelectorAll('.cut-card-half').forEach(node => node.remove());
+
+      const topHalf = document.createElement('div');
+      topHalf.className = 'cut-card-half top';
+
+      const bottomHalf = document.createElement('div');
+      bottomHalf.className = 'cut-card-half bottom';
+
+      root.appendChild(topHalf);
+      root.appendChild(bottomHalf);
+
+      setTimeout(() => {
+        topHalf.remove();
+        bottomHalf.remove();
+      }, 760);
+    }
+
     function renderTableSeats() {
       const root = $('tableSeats');
       if (!root) return;
@@ -5977,6 +6029,8 @@ async function revealRound() {
       // 房主看 hostState.revealed，玩家看 clientState.lastReveal
       const isRoundOver = roundOverForUi();
       const started = (isHost ? (hostState.round > 0) : (clientState.round > 0));
+
+      const hasDealt = (clientState.cards9 && clientState.cards9.length);
 
       if (isRoundOver) {
           const readyMap = nextReadyMapForUi() || {};
@@ -6027,7 +6081,6 @@ async function revealRound() {
             }
           }
       } else {
-          const hasDealt = (clientState.cards9 && clientState.cards9.length);
           const started2 = (isHost ? (hostState.round > 0) : (clientState.round > 0));
 
           centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition';
@@ -6061,6 +6114,17 @@ async function revealRound() {
       }
 
       root.appendChild(centerBtn);
+
+      const preDealSelfReady = (!isHost && !started && !hasDealt && !!(clientState.readyMap || {})[myId]);
+      if (preDealSelfReady) {
+        const cutBtn = document.createElement('button');
+        cutBtn.type = 'button';
+        cutBtn.id = 'btnCutDeck';
+        cutBtn.className = 'absolute left-1/2 top-1/2 ml-24 -translate-y-1/2 rounded-full px-4 py-2 text-xs chip text-amber-100 border border-amber-200/30 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
+        cutBtn.textContent = 'cut牌';
+        cutBtn.addEventListener('click', () => playCutDeckAnimation(root));
+        root.appendChild(cutBtn);
+      }
 
       // Choose a smaller radius on narrow screens to avoid seats going out of bounds
       const rect = root.getBoundingClientRect();
