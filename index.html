@@ -306,6 +306,81 @@
       will-change: left, top, transform;
     }
 
+    @keyframes cutDeckTopStack {
+      0% {
+        transform: translate(-50%, -50%) rotate(-2deg);
+        opacity: 0;
+      }
+      18% { opacity: 1; }
+      36% {
+        transform: translate(-50%, calc(-50% - 20px)) rotate(-5deg);
+      }
+      68% {
+        transform: translate(calc(-50% + 50px), calc(-50% - 2px)) rotate(7deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(-50%, -50%) rotate(-2deg);
+        opacity: 0;
+      }
+    }
+
+    @keyframes cutDeckBottomStack {
+      0% {
+        transform: translate(-50%, -50%) rotate(1deg);
+        opacity: 0;
+      }
+      18% { opacity: 1; }
+      36% {
+        transform: translate(-50%, calc(-50% + 8px)) rotate(1deg);
+      }
+      68% {
+        transform: translate(calc(-50% - 50px), calc(-50% + 10px)) rotate(-6deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(-50%, -50%) rotate(1deg);
+        opacity: 0;
+      }
+    }
+
+    .cut-deck-stack {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 80px;
+      height: 112px;
+      border-radius: 12px;
+      border: 1px solid rgba(251,191,36,.55);
+      background:
+        radial-gradient(circle at 26% 22%, rgba(251,191,36,.38), transparent 58%),
+        linear-gradient(145deg, rgba(15,23,42,.95), rgba(30,41,59,.95));
+      box-shadow: 0 14px 30px rgba(0,0,0,.48);
+      pointer-events: none;
+      z-index: 44;
+    }
+
+    .cut-deck-stack::after {
+      content: '';
+      position: absolute;
+      left: 8px;
+      right: -5px;
+      bottom: -7px;
+      height: 12px;
+      border-radius: 0 0 10px 10px;
+      background:
+        repeating-linear-gradient(
+          to right,
+          rgba(248,250,252,.75) 0 2px,
+          rgba(226,232,240,.68) 2px 4px
+        );
+      border: 1px solid rgba(248,250,252,.45);
+      box-shadow: 0 4px 8px rgba(0,0,0,.28);
+    }
+
+    .cut-deck-stack.top { animation: cutDeckTopStack 900ms cubic-bezier(.2,.85,.2,1) forwards; }
+    .cut-deck-stack.bottom { animation: cutDeckBottomStack 900ms cubic-bezier(.2,.85,.2,1) forwards; }
+
     /* Hand dock safe-area */
     .hand-dock {
       padding-bottom: env(safe-area-inset-bottom);
@@ -5945,6 +6020,25 @@ async function revealRound() {
       return out;
     }
 
+    function playCutDeckAnimation(root) {
+      if (!root) return;
+      root.querySelectorAll('.cut-deck-stack').forEach(node => node.remove());
+
+      const topStack = document.createElement('div');
+      topStack.className = 'cut-deck-stack top';
+
+      const bottomStack = document.createElement('div');
+      bottomStack.className = 'cut-deck-stack bottom';
+
+      root.appendChild(bottomStack);
+      root.appendChild(topStack);
+
+      setTimeout(() => {
+        topStack.remove();
+        bottomStack.remove();
+      }, 960);
+    }
+
     function renderTableSeats() {
       const root = $('tableSeats');
       if (!root) return;
@@ -5977,6 +6071,8 @@ async function revealRound() {
       // 房主看 hostState.revealed，玩家看 clientState.lastReveal
       const isRoundOver = roundOverForUi();
       const started = (isHost ? (hostState.round > 0) : (clientState.round > 0));
+
+      const hasDealt = (clientState.cards9 && clientState.cards9.length);
 
       if (isRoundOver) {
           const readyMap = nextReadyMapForUi() || {};
@@ -6027,7 +6123,6 @@ async function revealRound() {
             }
           }
       } else {
-          const hasDealt = (clientState.cards9 && clientState.cards9.length);
           const started2 = (isHost ? (hostState.round > 0) : (clientState.round > 0));
 
           centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition';
@@ -6061,6 +6156,17 @@ async function revealRound() {
       }
 
       root.appendChild(centerBtn);
+
+      const preDealSelfReady = (!isHost && !started && !hasDealt && !!(clientState.readyMap || {})[myId]);
+      if (preDealSelfReady) {
+        const cutBtn = document.createElement('button');
+        cutBtn.type = 'button';
+        cutBtn.id = 'btnCutDeck';
+        cutBtn.className = 'absolute left-1/2 top-1/2 ml-24 -translate-y-1/2 rounded-full px-4 py-2 text-xs chip text-amber-100 border border-amber-200/30 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
+        cutBtn.textContent = 'cut牌';
+        cutBtn.addEventListener('click', () => playCutDeckAnimation(root));
+        root.appendChild(cutBtn);
+      }
 
       // Choose a smaller radius on narrow screens to avoid seats going out of bounds
       const rect = root.getBoundingClientRect();
