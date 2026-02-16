@@ -373,19 +373,18 @@
     .cut-deck-stack::after {
       content: '';
       position: absolute;
-      left: 4px;
-      right: -8px;
-      bottom: -8px;
-      height: 12px;
+      left: 6px;
+      right: 6px;
+      bottom: -6px;
+      height: 8px;
       border-radius: 0 0 8px 8px;
-      background:
-        repeating-linear-gradient(
-          to right,
-          rgba(241,245,249,.82) 0 2px,
-          rgba(226,232,240,.66) 2px 4px
-        );
-      border: 1px solid rgba(226,232,240,.52);
-      box-shadow: 0 3px 7px rgba(0,0,0,.24);
+      background: linear-gradient(
+        to bottom,
+        rgba(148,163,184,.25),
+        rgba(15,23,42,.2)
+      );
+      border: 1px solid rgba(148,163,184,.22);
+      box-shadow: 0 4px 8px rgba(2,6,23,.22);
     }
 
     #tableSeats.cut-animating #btnOpenActionMenu {
