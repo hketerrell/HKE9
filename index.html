@@ -2969,6 +2969,66 @@
       return arr;
     }
 
+    function randomInt(min, max) {
+      const lo = Math.ceil(Number(min) || 0);
+      const hi = Math.floor(Number(max) || 0);
+      if (hi <= lo) return lo;
+      return lo + Math.floor(Math.random() * (hi - lo + 1));
+    }
+
+    function applyDeckCut(deck, point) {
+      if (!Array.isArray(deck) || deck.length <= 1) return Array.isArray(deck) ? deck.slice() : [];
+      const pRaw = Number(point || 0);
+      const p = Math.max(1, Math.min(deck.length - 1, Number.isFinite(pRaw) ? Math.floor(pRaw) : 0));
+      if (!p) return deck.slice();
+      return deck.slice(p).concat(deck.slice(0, p));
+    }
+
+    function canCutDeckNow() {
+      if (isHost) {
+        if (hostState.pendingCut) return false;
+        return hostState.round === 0 || !!hostState.revealed;
+      }
+      if (clientState.pendingCut) return false;
+      const started = Number(clientState.round || 0) > 0;
+      return !started || !!roundOverForUi();
+    }
+
+    function applyHostDeckCut(byId, byName) {
+      if (!canCutDeckNow()) return false;
+      const point = randomInt(1, 53);
+      hostState.pendingCut = { point, byId, byName, at: Date.now() };
+      broadcast({ t:'deckCut', byId, byName, point });
+      const root = $('tableSeats');
+      if (root) playCutDeckAnimation(root);
+      const who = String(byName || getNameById(byId) || '玩家');
+      glog(`${who} cut牌（切點 ${point}），下一局將套用`);
+      toast(`${who} cut牌成功（下一局生效）`);
+      return true;
+    }
+
+    function requestDeckCut() {
+      if (!canCutDeckNow()) {
+        if (isHost ? !!hostState.pendingCut : !!clientState.pendingCut) {
+          toast('本局已 cut 過牌（每局只能 cut 一次）');
+        } else {
+          toast('目前不能 cut牌');
+        }
+        return;
+      }
+
+      if (isHost) {
+        applyHostDeckCut(hostId, clientState.myName || '房主');
+        return;
+      }
+      if (!clientConn) {
+        toast('尚未連線，無法 cut牌');
+        return;
+      }
+      send(clientConn, { t:'cutDeck' });
+      toast('已送出 cut牌請求');
+    }
+
     // -------------------- 2-card / 3-card evaluation w/ 鬼牌 --------------------
     function eval2(cards) {
       const jokers = cards.filter(c => c?.s==='J').length;
@@ -3995,6 +4055,7 @@ function eval3NoJoker(cards) {
       dealerOverride: null, // dealerId chosen during dealer pick phase
       revealInProgress: false,
       lastReveal: null,
+      pendingCut: null, // {point, byId, byName, at}
     };
 
     // Client state
@@ -4027,6 +4088,7 @@ function eval3NoJoker(cards) {
       keepRevealOnTable: false,
       revealTableRendered: false,
       waitingForHost: false,
+      pendingCut: null, // {point, byId, byName, at}
       appVersion: '',
       selfUndieEnabled: false,
     };
@@ -4976,6 +5038,21 @@ function eval3NoJoker(cards) {
         return;
       }
 
+      if (msg.t === 'cutDeck') {
+        const pid = conn.peer;
+        const pname = hostState.players?.[pid]?.name || getNameById(pid) || '玩家';
+        if (hostState.pendingCut) {
+          send(conn, { t:'error', message:'本局已 cut 過牌（每局只能 cut 一次）' });
+          return;
+        }
+        if (!canCutDeckNow()) {
+          send(conn, { t:'error', message:'目前不能 cut牌' });
+          return;
+        }
+        applyHostDeckCut(pid, pname);
+        return;
+      }
+
       if (msg.t === 'dealerPickChoice') {
         // controller sends {round, kind, dealerId}
         const pick = msg.pick || {};
@@ -5203,6 +5280,7 @@ function eval3NoJoker(cards) {
       if (msg.t === 'deal') {
         clientState.round = msg.round;
         updateMidActionButton();
+        clientState.pendingCut = null;
         // ready map for seat tick
         try { clientState.readyMap = msg.ready || {}; } catch {}
         try { clientState.nextReadyMap = {}; } catch {}
@@ -5250,6 +5328,20 @@ function eval3NoJoker(cards) {
         try { renderTableSeats(); } catch {}
         renderReadyList();
         updateMidActionButton();
+        return;
+      }
+
+      if (msg.t === 'deckCut') {
+        const who = String(msg.byName || getNameById(msg.byId) || '玩家');
+        clientState.pendingCut = {
+          point: Number(msg.point || 0),
+          byId: msg.byId || null,
+          byName: who,
+          at: Date.now(),
+        };
+        const root = $('tableSeats');
+        if (root) playCutDeckAnimation(root);
+        toast(`${who} cut牌成功（下一局生效）`);
         return;
       }
 
@@ -5722,7 +5814,10 @@ function eval3NoJoker(cards) {
       glog(`第 ${hostState.round} 局：發牌中…`);
 
       const ids = activePlayerIdsForDeal();
-      const deck = shuffle(makeDeck54());
+      const shuffled = shuffle(makeDeck54());
+      const pendingCutPoint = Number(hostState.pendingCut?.point || 0);
+      const deck = pendingCutPoint ? applyDeckCut(shuffled, pendingCutPoint) : shuffled;
+      hostState.pendingCut = null;
       const need = ids.length * 9;
       if (deck.length < need) {
         toast('人數過多，牌不夠（此原型為單副 54 張）');
@@ -6225,7 +6320,7 @@ async function revealRound() {
         cutBtn.id = 'btnCutDeck';
         cutBtn.className = 'absolute left-1/2 top-1/2 ml-24 -translate-y-1/2 rounded-full px-4 py-2 text-xs chip text-amber-100 border border-amber-200/30 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
         cutBtn.textContent = 'cut牌';
-        cutBtn.addEventListener('click', () => playCutDeckAnimation(root));
+        cutBtn.addEventListener('click', () => requestDeckCut());
         root.appendChild(cutBtn);
       }
 
