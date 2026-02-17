@@ -402,6 +402,21 @@ function shuffle(arr) {
   return out;
 }
 
+function randomInt(min, max) {
+  const lo = Math.ceil(Number(min) || 0);
+  const hi = Math.floor(Number(max) || 0);
+  if (hi <= lo) return lo;
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+function applyDeckCut(deck, point) {
+  if (!Array.isArray(deck) || deck.length <= 1) return Array.isArray(deck) ? deck.slice() : [];
+  const pRaw = Number(point || 0);
+  const p = Math.max(1, Math.min(deck.length - 1, Number.isFinite(pRaw) ? Math.floor(pRaw) : 0));
+  if (!p) return deck.slice();
+  return deck.slice(p).concat(deck.slice(0, p));
+}
+
 function cardKey(c) {
   if (!c) return '';
   if (c.s === 'J') return c.j;
@@ -463,6 +478,7 @@ function getRoom(roomId) {
       preStartReadyMap: {},
       dealerPick: null,
       dealerOverride: null,
+      pendingCutPoint: 0,
     });
   }
   return rooms.get(id);
@@ -595,7 +611,10 @@ function dealRound(room) {
 
   for (const id of ids) room.preStartReadyMap[id] = false;
 
-  const deck = shuffle(makeDeck54());
+  const shuffled = shuffle(makeDeck54());
+  const cutPoint = Number(room.pendingCutPoint || 0);
+  const deck = cutPoint ? applyDeckCut(shuffled, cutPoint) : shuffled;
+  room.pendingCutPoint = 0;
   for (const id of ids) {
     room.dealt[id] = { all9: deck.splice(0, 9) };
   }
@@ -879,6 +898,24 @@ wss.on('connection', (ws) => {
         for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
         relayToRoom(room, { t: 'ready', ready });
         maybeStartNextRound(room);
+        return;
+      }
+
+      if (payload.t === 'cutDeck') {
+        const canCut = !room.started || !!room.revealed;
+        if (room.pendingCutPoint) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'error', message: '本局已 cut 過牌（每局只能 cut 一次）' } });
+          return;
+        }
+        if (!canCut) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'error', message: '目前不能 cut牌' } });
+          return;
+        }
+        const p = room.clients.get(ws.id);
+        const byName = String(p?.name || '玩家');
+        const point = randomInt(1, 53);
+        room.pendingCutPoint = point;
+        relayToRoom(room, { t: 'deckCut', byId: ws.id, byName, point });
         return;
       }
 
