@@ -6257,7 +6257,6 @@ async function revealRound() {
           centerBtn.classList.add('opacity-70', 'cursor-not-allowed');
         }
         root.appendChild(centerBtn);
-        return;
       }
 
       // 判斷是否處於「已結算/已比牌」狀態
@@ -6315,7 +6314,8 @@ async function revealRound() {
               centerBtn.classList.add('opacity-70', 'cursor-not-allowed');
             }
           }
-      } else {
+          if (isHost || isSeated) root.appendChild(centerBtn);
+      } else if (isHost || isSeated) {
           const started2 = (isHost ? (hostState.round > 0) : (clientState.round > 0));
 
           centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black hover:brightness-110 active:scale-[0.99] transition';
@@ -6346,9 +6346,9 @@ async function revealRound() {
                openArrangeModal();
             });
           }
-      }
 
-      root.appendChild(centerBtn);
+          root.appendChild(centerBtn);
+      }
 
       const selfIdForCut = isHost ? hostId : myId;
       const preGameReadyMap = isHost ? readyMapForBroadcast() : (clientState.readyMap || {});
@@ -6372,7 +6372,7 @@ async function revealRound() {
         const standBtn = document.createElement('button');
         standBtn.type = 'button';
         standBtn.id = 'btnStandUp';
-        standBtn.className = 'absolute left-1/2 top-1/2 -ml-24 -translate-y-1/2 rounded-full px-4 py-2 text-xs chip text-slate-100 border border-white/20 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
+        standBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 translate-y-12 rounded-full px-4 py-2 text-xs chip text-slate-100 border border-white/20 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
         standBtn.textContent = '站起來';
         standBtn.addEventListener('click', () => {
           if (!clientConn) return;
