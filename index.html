@@ -5254,6 +5254,16 @@ function eval3NoJoker(cards) {
         return;
       }
 
+      if (msg.t === 'sitDownResult') {
+        if (msg.ok) {
+          if (msg.reason === 'seated') toast('已成功坐下，下一局可參與');
+          try { renderTableSeats(); } catch {}
+        } else if (msg.reason === 'full') {
+          toast('目前已滿座，請先觀戰');
+        }
+        return;
+      }
+
       if (msg.t === 'settings') {
         clientState.settings = msg.settings || clientState.settings;
         $('inpRounds').value = clientState.settings.roundsTotal;
@@ -6119,7 +6129,9 @@ async function revealRound() {
           left.appendChild(el('div', 'text-xs text-emerald-100/70 mono truncate', p.id));
           row.appendChild(left);
           const right = el('div', 'text-xs px-2 py-1 rounded-full bg-amber-300/10 border border-amber-200/20 text-amber-100');
-          right.textContent = (p.id === hostId || (isHost && p.id === myId)) ? 'Host' : 'Player';
+          const seatedIds = new Set((isHost ? hostState.seatOrder : clientState.seatOrder) || []);
+          const isHostRow = (p.id === hostId || (isHost && p.id === myId));
+          right.textContent = isHostRow ? 'Host' : (seatedIds.has(p.id) ? 'Player' : '觀眾');
           row.appendChild(right);
           list.appendChild(row);
         }
@@ -6194,9 +6206,8 @@ async function revealRound() {
       if (clientState.keepRevealOnTable && roundOverForUi() && clientState.revealTableRendered) return;
       root.innerHTML = '';
 
-      const playersAll = currentPlayersListForTable();
-      const N = Math.max(1, Math.min(6, playersAll.length));
-      const players = playersAll.slice(0, N);
+      const players = currentPlayersListForTable();
+      const N = players.length;
 
       // [修改] 中間按鈕邏輯
       const centerBtn = document.createElement('button');
@@ -6216,6 +6227,29 @@ async function revealRound() {
           return;
       }
       
+      const selfIdForSeat = isHost ? hostId : myId;
+      const seatOrder = (isHost ? hostState.seatOrder : clientState.seatOrder) || [];
+      const isSeated = !!selfIdForSeat && seatOrder.includes(selfIdForSeat);
+      const hasSeatAvailable = seatOrder.length < 6;
+
+      if (!isHost && !isSeated) {
+        centerBtn.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full px-6 py-3 chip text-amber-100 text-sm font-black transition';
+        if (hasSeatAvailable) {
+          centerBtn.classList.add('hover:brightness-110', 'active:scale-[0.99]');
+          centerBtn.textContent = '坐下';
+          centerBtn.onclick = () => {
+            if (!clientConn) return;
+            send(clientConn, { t: 'sitDown' });
+          };
+        } else {
+          centerBtn.textContent = '觀戰中';
+          centerBtn.disabled = true;
+          centerBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        }
+        root.appendChild(centerBtn);
+        return;
+      }
+
       // 判斷是否處於「已結算/已比牌」狀態
       // 房主看 hostState.revealed，玩家看 clientState.lastReveal
       const isRoundOver = roundOverForUi();
