@@ -5264,6 +5264,16 @@ function eval3NoJoker(cards) {
         return;
       }
 
+      if (msg.t === 'standUpResult') {
+        if (msg.ok) {
+          if (msg.reason === 'spectator') toast('已站起來，切換為觀眾');
+          try { renderTableSeats(); } catch {}
+        } else if (msg.reason === 'in-round') {
+          toast('本局進行中，請於下一局前再站起來');
+        }
+        return;
+      }
+
       if (msg.t === 'settings') {
         clientState.settings = msg.settings || clientState.settings;
         $('inpRounds').value = clientState.settings.roundsTotal;
@@ -6356,6 +6366,19 @@ async function revealRound() {
         cutBtn.textContent = 'cut牌';
         cutBtn.addEventListener('click', () => requestDeckCut());
         root.appendChild(cutBtn);
+      }
+
+      if (!isHost && isSeated && !started && !hasDealt) {
+        const standBtn = document.createElement('button');
+        standBtn.type = 'button';
+        standBtn.id = 'btnStandUp';
+        standBtn.className = 'absolute left-1/2 top-1/2 -ml-24 -translate-y-1/2 rounded-full px-4 py-2 text-xs chip text-slate-100 border border-white/20 bg-white/10 hover:bg-white/15 active:scale-[0.98] transition';
+        standBtn.textContent = '站起來';
+        standBtn.addEventListener('click', () => {
+          if (!clientConn) return;
+          send(clientConn, { t: 'standUp' });
+        });
+        root.appendChild(standBtn);
       }
 
       // Choose a smaller radius on narrow screens to avoid seats going out of bounds

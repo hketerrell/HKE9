@@ -930,6 +930,33 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      if (payload.t === 'standUp') {
+        if (!room.seatOrder.includes(ws.id)) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'standUpResult', ok: true, reason: 'already-spectator' } });
+          return;
+        }
+        const playingThisRound = !!(room.started && !room.revealed && room.dealt[ws.id]);
+        if (playingThisRound) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'standUpResult', ok: false, reason: 'in-round' } });
+          return;
+        }
+
+        room.seatOrder = room.seatOrder.filter((id) => id !== ws.id);
+        delete room.preStartReadyMap[ws.id];
+        delete room.nextReadyMap[ws.id];
+        delete room.dealt[ws.id];
+        delete room.submissions[ws.id];
+
+        broadcastPlayers(room);
+        if (!room.started) {
+          const ready = {};
+          for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
+          relayToRoom(room, { t: 'ready', ready });
+        }
+        send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'standUpResult', ok: true, reason: 'spectator' } });
+        return;
+      }
+
       if (payload.t === 'cutDeck') {
         const canCut = !room.started || !!room.revealed;
         if (room.pendingCutPoint) {
