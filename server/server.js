@@ -8,6 +8,7 @@ const { computeRoundResult } = require('./score');
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const SERVER_HOST_ID = 'SERVER';
+const MAX_SEATS = 6;
 const RECORD_ROOM_IDS = new Set(['DAY', 'MON']);
 
 let recordsPool = null;
@@ -596,6 +597,10 @@ function broadcastPlayers(room) {
   relayToRoom(room, { t: 'players', list: roomPlayers(room), hostId: SERVER_HOST_ID, hostName: 'SERVER', seatOrder: room.seatOrder.slice() });
 }
 
+function hasSeatAvailable(room) {
+  return Array.isArray(room?.seatOrder) && room.seatOrder.length < MAX_SEATS;
+}
+
 function dealRound(room) {
   const ids = room.seatOrder.filter((id) => room.clients.has(id));
   if (ids.length === 0) return;
@@ -827,8 +832,10 @@ wss.on('connection', (ws) => {
 
       room.clients.set(ws.id, { socket: ws, name: playerName });
       delete room.disconnectedSeatNames[ws.id];
-      if (!room.seatOrder.includes(ws.id)) room.seatOrder.push(ws.id);
-      if (room.preStartReadyMap[ws.id] === undefined) room.preStartReadyMap[ws.id] = false;
+      if (!room.seatOrder.includes(ws.id) && hasSeatAvailable(room)) {
+        room.seatOrder.push(ws.id);
+      }
+      if (room.seatOrder.includes(ws.id) && room.preStartReadyMap[ws.id] === undefined) room.preStartReadyMap[ws.id] = false;
       if (room.cumulative[ws.id] === undefined && room.cumulativeByName[playerName] !== undefined) {
         room.cumulative[ws.id] = Number(room.cumulativeByName[playerName] || 0);
       }
@@ -893,11 +900,60 @@ wss.on('connection', (ws) => {
 
       if (payload.t === 'preReady') {
         if (room.started) return;
+        if (!room.seatOrder.includes(ws.id)) return;
         room.preStartReadyMap[ws.id] = !!payload.ready;
         const ready = {};
         for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
         relayToRoom(room, { t: 'ready', ready });
         maybeStartNextRound(room);
+        return;
+      }
+
+      if (payload.t === 'sitDown') {
+        if (room.seatOrder.includes(ws.id)) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'sitDownResult', ok: true, reason: 'already-seated' } });
+          return;
+        }
+        if (!hasSeatAvailable(room)) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'sitDownResult', ok: false, reason: 'full' } });
+          return;
+        }
+        room.seatOrder.push(ws.id);
+        room.preStartReadyMap[ws.id] = false;
+        broadcastPlayers(room);
+        if (!room.started) {
+          const ready = {};
+          for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
+          relayToRoom(room, { t: 'ready', ready });
+        }
+        send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'sitDownResult', ok: true, reason: 'seated' } });
+        return;
+      }
+
+      if (payload.t === 'standUp') {
+        if (!room.seatOrder.includes(ws.id)) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'standUpResult', ok: true, reason: 'already-spectator' } });
+          return;
+        }
+        const playingThisRound = !!(room.started && !room.revealed && room.dealt[ws.id]);
+        if (playingThisRound) {
+          send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'standUpResult', ok: false, reason: 'in-round' } });
+          return;
+        }
+
+        room.seatOrder = room.seatOrder.filter((id) => id !== ws.id);
+        delete room.preStartReadyMap[ws.id];
+        delete room.nextReadyMap[ws.id];
+        delete room.dealt[ws.id];
+        delete room.submissions[ws.id];
+
+        broadcastPlayers(room);
+        if (!room.started) {
+          const ready = {};
+          for (const id of room.seatOrder) ready[id] = !!room.preStartReadyMap[id];
+          relayToRoom(room, { t: 'ready', ready });
+        }
+        send(ws, { t: 'relay', fromId: SERVER_HOST_ID, payload: { t: 'standUpResult', ok: true, reason: 'spectator' } });
         return;
       }
 
