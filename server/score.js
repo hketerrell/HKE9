@@ -527,6 +527,23 @@ function computeDealerIdFromSubmissions(submissions) {
   return bestId;
 }
 
+function finalizeRoundResult(dealerId, results) {
+  const ids = Object.keys(results || {});
+  const net = ids.reduce((sum, id) => sum + Number(results?.[id]?.total || 0), 0);
+  if (!net) return { dealerId, results };
+  if (!dealerId || !results?.[dealerId]) return { dealerId, results };
+
+  const dealerRow = results[dealerId];
+  const fixedDealerTotal = Number(dealerRow.total || 0) - net;
+  const fixNote = `平衡修正${net > 0 ? '-' : '+'}${Math.abs(net)}`;
+  results[dealerId] = {
+    ...dealerRow,
+    total: fixedDealerTotal,
+    note: dealerRow.note ? `${dealerRow.note}｜${fixNote}` : fixNote,
+  };
+  return { dealerId, results };
+}
+
 function computeRoundResult({ submissions, dealerOverride }) {
   const ids = Object.keys(submissions || {});
   if (!ids.length) throw new Error('No submissions');
@@ -602,7 +619,7 @@ function computeRoundResult({ submissions, dealerOverride }) {
           dealerCard: sub.dealerCard,
         };
       }
-      return { dealerId, results };
+      return finalizeRoundResult(dealerId, results);
     }
 
     const results = {};
@@ -650,7 +667,7 @@ function computeRoundResult({ submissions, dealerOverride }) {
       evalNames: { head: dealerSe.head.name, mid: dealerSe.mid.name, tail: dealerSe.tail.name },
       dealerCard: dealerSub.dealerCard,
     };
-    return { dealerId, results };
+    return finalizeRoundResult(dealerId, results);
   }
 
   const results = {};
@@ -786,7 +803,7 @@ function computeRoundResult({ submissions, dealerOverride }) {
     results[dealerId].note = (results[dealerId].note ? `${results[dealerId].note}｜` : '') + extra;
   }
 
-  return { dealerId, results };
+  return finalizeRoundResult(dealerId, results);
 }
 
 module.exports = {
