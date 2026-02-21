@@ -937,7 +937,7 @@
           <div class="flex flex-wrap items-center gap-2">
             <button id="btnTabDay" type="button" class="text-xs px-3 py-2 rounded-xl border border-white/10 bg-white/10 hover:bg-white/15 text-emerald-50 font-black">DAY</button>
             <button id="btnTabNig" type="button" class="text-xs px-3 py-2 rounded-xl border border-white/10 bg-white/10 hover:bg-white/15 text-emerald-50 font-black">MON</button>
-            <button id="btnTabHistory" type="button" class="text-xs px-3 py-2 rounded-xl border border-white/10 bg-white/10 hover:bg-white/15 text-emerald-50 font-black">最近20局變更</button>
+            <button id="btnTabHistory" type="button" class="text-xs px-3 py-2 rounded-xl border border-white/10 bg-white/10 hover:bg-white/15 text-emerald-50 font-black">最近30局變更</button>
             <div id="scoreboardStatus" class="ml-auto text-[11px] text-emerald-100/70">—</div>
           </div>
 
@@ -2179,7 +2179,7 @@
       const tab = scoreboardState.tab;
       const data = scoreboardState.cache[tab];
       const rawHistory = Array.isArray(data?.scoreHistory) ? data.scoreHistory : [];
-      const rows = rawHistory.slice(0, 20);
+      const rows = rawHistory.slice(0, 30);
 
       if (!rows.length) {
         const tr = document.createElement('tr');
@@ -4297,7 +4297,7 @@ function eval3NoJoker(cards) {
         roomId,
         updatedAt: now,
         scoresByName: persistState.scoresByName || {},
-        scoreHistory: Array.isArray(persistState.scoreHistory) ? persistState.scoreHistory.slice(0, 20) : [],
+        scoreHistory: Array.isArray(persistState.scoreHistory) ? persistState.scoreHistory.slice(0, 30) : [],
       };
     }
 
@@ -4338,7 +4338,7 @@ function eval3NoJoker(cards) {
       const current = Array.isArray(persistState.scoreHistory) ? persistState.scoreHistory.slice() : [];
       const normalizedRound = Number(nextEntry.round || 0);
       const filtered = current.filter((item) => Number(item?.round || 0) !== normalizedRound);
-      persistState.scoreHistory = [nextEntry, ...filtered].slice(0, 20);
+      persistState.scoreHistory = [nextEntry, ...filtered].slice(0, 30);
     }
 
     async function savePersistRecordNow(reason = '') {
@@ -4370,7 +4370,7 @@ function eval3NoJoker(cards) {
       const remote = await persistReadRecord(rid);
       if (remote && typeof remote === 'object') {
         persistState.scoresByName = remote.scoresByName || {};
-        persistState.scoreHistory = Array.isArray(remote.scoreHistory) ? remote.scoreHistory.slice(0, 20) : [];
+        persistState.scoreHistory = Array.isArray(remote.scoreHistory) ? remote.scoreHistory.slice(0, 30) : [];
         dlog(`Persist(API): loaded server record for ${rid}`);
       } else {
         persistState.scoreHistory = [];
@@ -4435,7 +4435,7 @@ function eval3NoJoker(cards) {
         roomId: rid,
         updatedAt: new Date().toISOString(),
         scoresByName: persistState.scoresByName || {},
-        scoreHistory: Array.isArray(persistState.scoreHistory) ? persistState.scoreHistory.slice(0, 20) : [],
+        scoreHistory: Array.isArray(persistState.scoreHistory) ? persistState.scoreHistory.slice(0, 30) : [],
       };
 
       const ok = await workerWriteRecord(rid, record);
@@ -4455,7 +4455,7 @@ function eval3NoJoker(cards) {
       const remote = await persistReadRecord(roomId);
       if (remote && typeof remote === 'object') {
         record.scoresByName = remote.scoresByName || {};
-        record.scoreHistory = Array.isArray(remote.scoreHistory) ? remote.scoreHistory.slice(0, 20) : [];
+        record.scoreHistory = Array.isArray(remote.scoreHistory) ? remote.scoreHistory.slice(0, 30) : [];
       }
 
       const prev = String(prevName || '').trim();
@@ -4472,7 +4472,7 @@ function eval3NoJoker(cards) {
       } else if (scores[next] === undefined) {
         scores[next] = 0;
       }
-      record = { ...record, roomId, updatedAt: now, scoresByName: scores, scoreHistory: Array.isArray(record.scoreHistory) ? record.scoreHistory.slice(0, 20) : [] };
+      record = { ...record, roomId, updatedAt: now, scoresByName: scores, scoreHistory: Array.isArray(record.scoreHistory) ? record.scoreHistory.slice(0, 30) : [] };
 
       await workerWriteRecord(roomId, record);
     }
