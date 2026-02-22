@@ -885,6 +885,7 @@
                 </div>
                 <select id="selReport" class="bg-slate-950 border border-white/20 rounded-lg px-1 py-1.5 text-xs text-slate-100 outline-none w-full text-center font-bold">
                     <option value="none">無 (不報到)</option>
+                    <option value="noHand">百無 +3</option>
                     <option value="allRed">全紅 +5</option>
                     <option value="allBlack">全黑 +5</option>
                     <option value="threeSnake">三蛇 +3</option>
@@ -894,7 +895,6 @@
                     <option value="threeStraightFlush">3同花順 +25</option>
                     <option value="twoFourKind">2個4條 +30</option>
                     <option value="greenDragon">青龍 +100</option>
-                    <option value="noHand">百無 +3</option>
                 </select>
              </div>
          </div>
@@ -5318,7 +5318,7 @@ function eval3NoJoker(cards) {
         clientState.pick = null;
         clientState.dealerTargetId = null;
         clientState.submitted = false;
-        try { $('selReport').value = 'none'; } catch {}
+        try { const sr = $('selReport'); if (sr) { sr.value = 'none'; sr.dataset.lastPreferredReport = ''; } } catch {}
         $('submitStatus').textContent = '尚未提交';
         $('submitStatus').className = 'text-xs text-emerald-50/80';
         $('scoreBody').innerHTML = '';
@@ -5881,7 +5881,7 @@ function eval3NoJoker(cards) {
       clientState.dealerTargetId = null;
       clientState.pendingGameOver = null;
       clientState.submitted = false;
-      try { $('selReport').value = 'none'; } catch {}
+      try { const sr = $('selReport'); if (sr) { sr.value = 'none'; sr.dataset.lastPreferredReport = ''; } } catch {}
       $('submitStatus').textContent = '尚未提交';
       $('submitStatus').className = 'text-xs text-emerald-50/80';
       $('scoreBody').innerHTML = '';
@@ -7245,7 +7245,17 @@ async function revealRound() {
 
       const selReport = $('selReport');
       if (selReport) {
-        if (arrangedHasJoker && selReport.value !== 'none') selReport.value = 'none';
+        const lastPreferred = selReport.dataset.lastPreferredReport || '';
+        if (arrangedHasJoker) {
+          if (selReport.value !== 'none') {
+            selReport.dataset.lastPreferredReport = selReport.value;
+            selReport.value = 'none';
+          }
+        } else if (selReport.value === 'none' && lastPreferred) {
+          const canRestore = Array.from(selReport.options || []).some((opt) => opt.value === lastPreferred);
+          if (canRestore) selReport.value = lastPreferred;
+        }
+
         for (const opt of selReport.options) {
           if (opt.value !== 'none') opt.disabled = arrangedHasJoker;
         }
@@ -7567,9 +7577,6 @@ async function revealRound() {
           autoFillRandomAllowFoul();
         }
 
-        // reset report to none to avoid accidental report
-        try { $('selReport').value = 'none'; } catch {}
-
         // submit
         try { submitArrangement(); } catch {}
       }, ARRANGE_LIMIT_MS);
@@ -7793,7 +7800,6 @@ async function revealRound() {
         try { autoFillRandomAllowFoul(); } catch {}
       }
 
-      try { $('selReport').value = 'none'; } catch {}
       try { submitArrangement(); } catch {}
 
       // Give relay a brief moment to flush submit before closing the room.
@@ -8027,6 +8033,11 @@ async function revealRound() {
     ensureSingleSwapMidTailButton()?.addEventListener('click', () => swapMidTailArranged());
     $('btnAutoFill').addEventListener('click', () => autoFillRandomNoFoul());
     $('btnSubmit').addEventListener('click', () => submitArrangement());
+    $('selReport')?.addEventListener('change', () => {
+      const sel = $('selReport');
+      if (!sel) return;
+      sel.dataset.lastPreferredReport = sel.value !== 'none' ? sel.value : '';
+    });
 
     $('btnReveal').addEventListener('click', () => {
       if (!isHost) return;
