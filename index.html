@@ -972,6 +972,7 @@
                     <th class="text-left py-2">局數</th>
                     <th class="text-left py-2">時間</th>
                     <th class="text-left py-2">變更</th>
+                    <th class="text-right py-2">操作</th>
                   </tr>
                 </thead>
                 <tbody id="scoreboardHistoryBody"></tbody>
@@ -2185,7 +2186,7 @@
         const tr = document.createElement('tr');
         tr.className = 'border-b border-white/5';
         const td = el('td','py-3 text-emerald-50/70 text-sm','尚無資料');
-        td.colSpan = 3;
+        td.colSpan = 4;
         tr.appendChild(td);
         body.appendChild(tr);
         return;
@@ -2208,8 +2209,79 @@
           }).join(' ｜ ')
           : '—';
         tr.appendChild(el('td','py-2 pr-2 text-slate-50', changeText));
+        const actionTd = el('td','py-2 pl-2 text-right whitespace-nowrap');
+        const waiveBtn = el('button','text-[11px] px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-300/25 text-rose-100 font-black','唔計');
+        waiveBtn.type = 'button';
+        waiveBtn.addEventListener('click', () => waiveScoreboardRound(item));
+        actionTd.appendChild(waiveBtn);
+        tr.appendChild(actionTd);
         body.appendChild(tr);
       });
+    }
+
+    function buildWaivedScoreboardRecord(record, historyItem) {
+      if (!record || typeof record !== 'object') throw new Error('未能讀取紀錄');
+      const roundNum = Number(historyItem?.round || 0);
+      const atText = String(historyItem?.at || historyItem?.updatedAt || '');
+      const history = Array.isArray(record.scoreHistory) ? record.scoreHistory.slice() : [];
+      const targetIndex = history.findIndex((item) => {
+        if (Number(item?.round || 0) !== roundNum) return false;
+        if (!atText) return true;
+        return String(item?.at || item?.updatedAt || '') === atText;
+      });
+      if (targetIndex < 0) throw new Error('找不到要唔計的局數');
+
+      const target = history[targetIndex];
+      const scores = { ...(record.scoresByName || {}) };
+      const changes = Array.isArray(target?.changes) ? target.changes : [];
+      changes.forEach((change) => {
+        const name = String(change?.name || '').trim();
+        if (!name) return;
+        const delta = Number(change?.delta || 0);
+        scores[name] = Number(scores[name] || 0) - delta;
+      });
+      history.splice(targetIndex, 1);
+
+      return {
+        ...record,
+        updatedAt: new Date().toISOString(),
+        scoresByName: scores,
+        scoreHistory: history.slice(0, 30),
+      };
+    }
+
+    async function waiveScoreboardRound(historyItem) {
+      const rid = String(scoreboardState.tab || 'DAY').toUpperCase() === 'MON' ? 'MON' : 'DAY';
+      const roundText = Number(historyItem?.round || 0) > 0 ? `第 ${Number(historyItem.round)} 局` : '這一局';
+      const password = window.prompt(`輸入密碼 TYW，確認 ${rid} ${roundText} 唔計。\n系統會刪除此行，並將該局分數從累計中扣回。`);
+      if (password === null) return;
+      if (String(password).trim() !== 'TYW') {
+        toast('密碼錯誤，未有唔計');
+        return;
+      }
+
+      setScoreboardStatus('唔計中…');
+      try {
+        const latest = await fetchScoreboard(rid);
+        const nextRecord = buildWaivedScoreboardRecord(latest, historyItem);
+        const ok = await workerWriteRecord(rid, nextRecord);
+        if (!ok) throw new Error('儲存失敗');
+        scoreboardState.cache[rid] = nextRecord;
+        if (persistState.enabled && persistState.roomId === rid) {
+          persistState.scoresByName = { ...(nextRecord.scoresByName || {}) };
+          persistState.scoreHistory = Array.isArray(nextRecord.scoreHistory) ? nextRecord.scoreHistory.slice(0, 30) : [];
+          applyPersistScoresToClientCumulative();
+          try { renderPlayers(); } catch {}
+          try { renderTableSeats(); } catch {}
+          try { updateMyCumulative(); } catch {}
+        }
+        renderScoreboardContent();
+        setScoreboardStatus(`${rid} ${roundText} 已唔計，紀錄已重新計算`);
+        toast(`${rid} ${roundText} 已唔計`);
+      } catch (e) {
+        setScoreboardStatus('唔計失敗：' + (e?.message || e));
+        toast('唔計失敗：' + (e?.message || e));
+      }
     }
 
     function renderScoreboardContent() {
