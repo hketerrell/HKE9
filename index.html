@@ -2253,10 +2253,10 @@
     async function waiveScoreboardRound(historyItem) {
       const rid = String(scoreboardState.tab || 'DAY').toUpperCase() === 'MON' ? 'MON' : 'DAY';
       const roundText = Number(historyItem?.round || 0) > 0 ? `第 ${Number(historyItem.round)} 局` : '這一局';
-      const password = window.prompt(`輸入密碼 TYW，確認 ${rid} ${roundText} 唔計。\n系統會刪除此行，並將該局分數從累計中扣回。`);
+      const password = window.prompt(`輸入密碼 ，確認 ${rid} ${roundText} 唔計。\n系統會刪除此行，並將該局分數從累計中扣回。`);
       if (password === null) return;
       if (String(password).trim() !== 'TYW') {
-        toast('密碼錯誤，未有唔計');
+        toast('密碼錯誤');
         return;
       }
 
